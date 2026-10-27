@@ -96,7 +96,7 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
             # Complete manuscript matching the AKR1C3 Pippione paper in the user's Library.
-            python worker.py --url "https://iris.unito.it/bitstream/2318/1648089/2/Revised%20manuscript%20EJMECH-D-17-00778_4aperto.pdf" --pages "1-11" --output results
+            python worker.py --url "https://iris.unito.it/bitstream/2318/1648089/2/Revised%20manuscript%20EJMECH-D-17-00778_4aperto.pdf" --pages "all" --output results
           elif [ -n "$PDF_PATH" ]; then
             python worker.py --file "$PDF_PATH" --pages "$PDF_PAGES" --output results
           else
