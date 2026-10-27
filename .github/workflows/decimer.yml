@@ -1,5 +1,9 @@
 name: DECIMER PDF extraction
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/decimer.yml'
   workflow_dispatch:
     inputs:
       pdf_path:
@@ -50,7 +54,21 @@ jobs:
           TF_CPP_MIN_LOG_LEVEL: "2"
           CUDA_VISIBLE_DEVICES: "-1"
         run: |
-          if [ -n "$PDF_PATH" ]; then
+          if [ "${{ github.event_name }}" = "push" ]; then
+            mkdir -p jobs/smoke
+            python - <<'PY'
+          from PIL import Image, ImageDraw
+          img=Image.new("RGB",(1200,900),"white")
+          d=ImageDraw.Draw(img)
+          pts=[(410,240),(510,295),(510,410),(410,465),(310,410),(310,295)]
+          for i in range(6): d.line([pts[i],pts[(i+1)%6]],fill="black",width=9)
+          for a,b in [(0,1),(2,3),(4,5)]:
+              x1,y1=pts[a];x2,y2=pts[b]
+              d.line([(x1*0.85+410*0.15,y1*0.85+355*0.15),(x2*0.85+410*0.15,y2*0.85+355*0.15)],fill="black",width=5)
+          img.save("jobs/smoke/paper.pdf","PDF",resolution=150.0)
+          PY
+            python worker.py --file jobs/smoke/paper.pdf --pages 1 --output results
+          elif [ -n "$PDF_PATH" ]; then
             python worker.py --file "$PDF_PATH" --pages "$PDF_PAGES" --output results
           else
             python worker.py --url "$PDF_URL" --pages "$PDF_PAGES" --output results
