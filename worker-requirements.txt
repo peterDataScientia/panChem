@@ -1,0 +1,9 @@
+numpy==1.26.4
+tensorflow==2.15.1
+opencv-python-headless==4.10.0.84
+decimer-segmentation==1.6.0
+decimer==2.8.1
+rdkit>=2024.9
+pypdfium2>=4.30,<6
+Pillow>=10,<11
+requests>=2.31,<3
