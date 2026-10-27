@@ -13,6 +13,8 @@ from PIL import Image
 from rdkit import Chem
 
 def parse_pages(raw, count):
+    if raw.strip().lower() == 'all':
+        return list(range(1, count + 1))
     out=set()
     for item in raw.replace(" ","").split(","):
         if "-" in item:
