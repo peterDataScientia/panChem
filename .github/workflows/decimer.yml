@@ -1,0 +1,46 @@
+name: DECIMER PDF extraction
+on:
+  workflow_dispatch:
+    inputs:
+      pdf_url:
+        description: "HTTPS link to PDF, accessible by GitHub runner; use only documents safe for external fetching"
+        required: true
+        type: string
+      pages:
+        description: "PDF pages: e.g. 1,3,5-7"
+        required: true
+        default: "1"
+        type: string
+permissions:
+  contents: read
+jobs:
+  decimer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install Linux libraries
+        run: sudo apt-get update && sudo apt-get install -y libgl1 libglib2.0-0
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run automatic extraction
+        env:
+          PDF_URL: ${{ inputs.pdf_url }}
+          PDF_PAGES: ${{ inputs.pages }}
+          TF_CPP_MIN_LOG_LEVEL: "2"
+        run: |
+          python worker.py --url "$PDF_URL" --pages "$PDF_PAGES" --output results
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: panChem-extraction-${{ github.run_id }}
+          path: |
+            results/results.csv
+            results/results.smi
+            results/page_*_structure_*.png
+          if-no-files-found: warn
+          retention-days: 7
