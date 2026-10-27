@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 
 from rdkit import Chem
 from rdkit.Chem import inchi
-from rdkit.Chem.Draw import rdMolDraw2D
 
 MARKUSH = re.compile(r"\[(?:R\d*|X\d*|Y\d*|Z\d*|Ar\d*)\]|\bR\d+\b", re.IGNORECASE)
 
@@ -30,10 +29,14 @@ def assess(smiles):
     return status, canonical, key, mol
 
 def molecule_svg(mol):
-    d = rdMolDraw2D.MolDraw2DSVG(460, 330)
-    d.DrawMolecule(mol)
-    d.FinishDrawing()
-    return d.GetDrawingText()
+    try:
+        from rdkit.Chem.Draw import rdMolDraw2D
+        drawer = rdMolDraw2D.MolDraw2DSVG(460, 330)
+        drawer.DrawMolecule(mol)
+        drawer.FinishDrawing()
+        return drawer.GetDrawingText()
+    except (ImportError, OSError, TypeError, RuntimeError):
+        return None
 
 def rows_from_artifact(blob):
     with zipfile.ZipFile(io.BytesIO(blob)) as z:
