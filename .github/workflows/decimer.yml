@@ -92,19 +92,18 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
             python - <<'PY'
-          import re, subprocess
-          msg = subprocess.check_output(["git", "log", "-1", "--format=%B"], text=True).strip()
+          import json, os, re, subprocess
+          from pathlib import Path
+          event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+          msg = (event.get("head_commit") or {}).get("message", "").strip()
           match = re.fullmatch(r"panChem PDF job ([0-9a-f]{12}) pages=([0-9,-]+)", msg)
           if not match:
-              raise SystemExit(f"Unexpected commit message: {msg!r}")
-          pdf_path = f"jobs/{match.group(1)}/paper.pdf"
-          changed = subprocess.check_output(
-              ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"], text=True
-          ).splitlines()
-          if pdf_path not in changed:
-              raise SystemExit(f"Uploaded PDF not present in changed files: {changed}")
+              raise SystemExit(f"Unexpected push commit message: {msg!r}")
+          pdf_path = Path("jobs") / match.group(1) / "paper.pdf"
+          if not pdf_path.is_file():
+              raise SystemExit(f"Uploaded PDF missing: {pdf_path}")
           print(f"Processing uploaded PDF: {pdf_path} | pages={match.group(2)}", flush=True)
-          subprocess.check_call(["python", "worker.py", "--file", pdf_path,
+          subprocess.check_call(["python", "worker.py", "--file", str(pdf_path),
                                  "--pages", match.group(2), "--output", "results"])
           PY
           elif [ -n "$PDF_PATH" ]; then
