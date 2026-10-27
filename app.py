@@ -1,151 +1,185 @@
 import csv
-import io
 import hashlib
+import io
 import tempfile
-import zipfile
+from pathlib import Path
+from zipfile import ZipFile
 
 import pypdfium2 as pdfium
 import streamlit as st
 from PIL import Image
-from streamlit_image_coordinates import streamlit_image_coordinates
+from rdkit import Chem
+from rdkit.Chem import Draw
 
-st.set_page_config(page_title="panChem | PDF to SMILES", page_icon="🧪", layout="wide")
+st.set_page_config(page_title="panChem | Automatic PDF to SMILES", page_icon="🧪", layout="wide")
 st.title("🧪 panChem")
-st.caption("Select a paper page, crop a chemical structure, predict SMILES with DECIMER, then review and export.")
+st.caption("Choose PDF pages → detect every chemical structure automatically → predict and review SMILES.")
 
-@st.cache_data(show_spinner=False, max_entries=12)
-def render_page(data: bytes, page: int, scale: float = 2.0):
-    doc = pdfium.PdfDocument(data)
+@st.cache_data(show_spinner=False, max_entries=32)
+def page_png(pdf_bytes: bytes, page: int, scale: float = 2.0) -> bytes:
+    pdf = pdfium.PdfDocument(pdf_bytes)
     try:
-        return doc[page - 1].render(scale=scale).to_pil().convert("RGB")
+        rendered = pdf[page - 1].render(scale=scale).to_pil().convert("RGB")
+        buf = io.BytesIO()
+        rendered.save(buf, format="PNG")
+        return buf.getvalue()
     finally:
-        doc.close()
+        pdf.close()
 
-@st.cache_resource(show_spinner="Loading DECIMER model...")
-def get_predictor():
-    from DECIMER import predict_SMILES
-    return predict_SMILES
-
-def predict(image):
-    model = get_predictor()
-    with tempfile.NamedTemporaryFile(suffix=".png") as f:
-        image.save(f.name)
-        return str(model(f.name))
-
-def validate(smiles):
-    from rdkit import Chem
+def syntax_check(smiles: str):
+    if not smiles.strip():
+        return "Missing", ""
     mol = Chem.MolFromSmiles(smiles)
-    return ("Valid syntax", Chem.MolToSmiles(mol)) if mol else ("Invalid syntax", smiles)
+    return ("Valid SMILES syntax", Chem.MolToSmiles(mol)) if mol else ("Invalid SMILES syntax", "")
 
-upload = st.file_uploader("Upload PDF research paper", type="pdf")
-if upload is None:
-    st.info("Upload a PDF to start.")
+def extract_page(pdf_bytes: bytes, page: int):
+    from decimer_segmentation import segment_chemical_structures_from_file
+    from DECIMER import predict_SMILES
+    png = page_png(pdf_bytes, page, 300 / 72)
+    with tempfile.TemporaryDirectory(prefix="panchem_") as temp:
+        page_path = Path(temp) / "page.png"
+        page_path.write_bytes(png)
+        segments, boxes = segment_chemical_structures_from_file(
+            str(page_path), expand=True, return_bboxes=True
+        )
+        records = []
+        for idx, (segment, box) in enumerate(zip(segments, boxes), 1):
+            image = Image.fromarray(segment).convert("RGB")
+            out = Path(temp) / f"structure_{idx}.png"
+            image.save(out)
+            try:
+                prediction = str(predict_SMILES(str(out)))
+                error = ""
+            except Exception as exc:
+                prediction = ""
+                error = f"{type(exc).__name__}: {exc}"
+            records.append(dict(page=page, ordinal=idx, bbox=str(tuple(int(x) for x in box)),
+                                image=out.read_bytes(), original_smiles=prediction,
+                                smiles=prediction, error=error))
+        return records
+
+def parse_pages(expression: str, count: int):
+    result = set()
+    for token in expression.replace(" ", "").split(","):
+        if not token:
+            continue
+        if "-" in token:
+            parts = token.split("-")
+            if len(parts) != 2 or not all(p.isdigit() for p in parts):
+                raise ValueError(f"Invalid page range: {token}")
+            a, b = map(int, parts)
+            if a > b:
+                raise ValueError("Page ranges must be ascending.")
+            result.update(range(a, b + 1))
+        elif token.isdigit():
+            result.add(int(token))
+        else:
+            raise ValueError(f"Invalid page number: {token}")
+    if not result or min(result) < 1 or max(result) > count:
+        raise ValueError(f"Select pages between 1 and {count}.")
+    return sorted(result)
+
+upload = st.file_uploader("Upload research paper", type=["pdf"])
+if not upload:
+    st.info("Upload a PDF and select the pages to extract. No cropping is required.")
     st.stop()
 
-data = upload.getvalue()
-if len(data) > 25 * 1024 * 1024:
-    st.error("PDF exceeds 25 MB limit.")
+pdf_data = upload.getvalue()
+if len(pdf_data) > 25 * 1024 * 1024:
+    st.error("File must not exceed 25 MB.")
     st.stop()
-
-fingerprint = hashlib.sha256(data).hexdigest()[:16]
-if st.session_state.get("active_pdf") != fingerprint:
-    st.session_state.active_pdf = fingerprint
-    st.session_state.results = []
-    st.session_state.corners = []
-    st.session_state.last_click = None
-    st.session_state.crop_key = None
-
 try:
-    doc = pdfium.PdfDocument(data)
-    count = len(doc)
+    doc = pdfium.PdfDocument(pdf_data)
+    page_count = len(doc)
     doc.close()
 except Exception as exc:
-    st.error(f"Could not read PDF: {exc}")
+    st.error(f"Unable to read PDF: {exc}")
     st.stop()
 
-st.success(f"Loaded {count} pages")
-page = st.selectbox("Page to extract from", range(1, count + 1), format_func=lambda n: f"Page {n}")
-image = render_page(data, page)
-width = st.slider("Preview width", 400, 1100, 750, step=50)
-ratio = width / image.width
-preview = image.resize((width, round(image.height * ratio)))
+key = hashlib.sha256(pdf_data).hexdigest()
+if st.session_state.get("document_key") != key:
+    st.session_state.document_key = key
+    st.session_state.extractions = []
+    st.session_state.last_selection = []
 
-st.subheader("Select structure")
-st.write("Click top-left corner and then bottom-right corner around a structure.")
-selection_id = f"{fingerprint}:{page}:{width}"
-if st.session_state.crop_key != selection_id:
-    st.session_state.crop_key = selection_id
-    st.session_state.corners = []
-    st.session_state.last_click = None
+st.write(f"**{upload.name}** · {page_count} pages")
+left, right = st.columns([2, 1])
+with left:
+    page_selection = st.text_input("Pages to process", value="1", placeholder="e.g. 3,5,8-10")
+with right:
+    preview_page = st.number_input("Preview page", min_value=1, max_value=page_count, value=1)
+st.image(page_png(pdf_data, preview_page, 1.4), caption=f"Page {preview_page}", width=600)
 
-clicked = streamlit_image_coordinates(preview, key=selection_id)
-if clicked:
-    pos = (clicked["x"], clicked["y"])
-    if pos != st.session_state.last_click:
-        st.session_state.last_click = pos
-        if len(st.session_state.corners) == 2:
-            st.session_state.corners = []
-        st.session_state.corners.append(pos)
+try:
+    pages = parse_pages(page_selection, page_count)
+    st.caption(f"Selected: {', '.join(map(str, pages))} ({len(pages)} pages)")
+except ValueError as exc:
+    st.error(str(exc))
+    pages = []
 
-if st.button("Reset crop"):
-    st.session_state.corners = []
-    st.session_state.last_click = None
-    st.rerun()
-
-corners = st.session_state.corners
-st.caption(f"Crop corners: {len(corners)}/2")
-if len(corners) == 2:
-    (x1, y1), (x2, y2) = corners
-    x0, x3 = sorted((round(x1 / ratio), round(x2 / ratio)))
-    y0, y3 = sorted((round(y1 / ratio), round(y2 / ratio)))
-    if x3 - x0 < 10 or y3 - y0 < 10:
-        st.warning("Select a larger region.")
+if st.button("🔎 Automatically extract structures and SMILES", type="primary", disabled=not pages):
+    st.session_state.extractions = []
+    progress = st.progress(0, text="Loading DECIMER models...")
+    all_records = []
+    for i, page in enumerate(pages):
+        try:
+            found = extract_page(pdf_data, page)
+            all_records.extend(found)
+            st.write(f"Page {page}: {len(found)} structures detected")
+        except Exception as exc:
+            st.error(f"Page {page} failed: {type(exc).__name__}: {exc}")
+        progress.progress((i + 1) / len(pages), text=f"Processed {i + 1}/{len(pages)} pages")
+    st.session_state.extractions = all_records
+    st.session_state.last_selection = pages
+    if not all_records:
+        st.warning("No structures extracted. Check page quality and server logs.")
     else:
-        crop = image.crop((x0, y0, x3, y3))
-        st.image(crop, caption="Selected structure", width=350)
-        if st.button("Recognize with DECIMER", type="primary"):
-            try:
-                with st.spinner("Predicting SMILES (model download on first run may be large)..."):
-                    raw = predict(crop)
-                    status, canonical = validate(raw)
-                records = st.session_state.results
-                records.append(dict(pdf=upload.name, page=page, structure_id=len(records) + 1,
-                                    smiles=raw, canonical_smiles=canonical,
-                                    syntax_check=status, image=crop.copy()))
-                st.success(f"Structure saved. {status}. Confirm chemical correctness manually.")
-            except Exception as exc:
-                st.error(f"DECIMER inference failed: {exc}")
+        st.success(f"Extracted {len(all_records)} structures from pages {pages}.")
 
-records = st.session_state.results
+records = st.session_state.extractions
 if records:
-    st.subheader("Review and export")
-    for i, item in enumerate(records):
-        with st.expander(f"Structure {item['structure_id']} · page {item['page']}"):
-            col1, col2 = st.columns([1, 2])
-            with col1:
-                st.image(item["image"], use_container_width=True)
-            with col2:
-                item["smiles"] = st.text_input("Review/edit SMILES", item["smiles"], key=f"smiles_{fingerprint}_{i}")
-                item["syntax_check"], item["canonical_smiles"] = validate(item["smiles"])
-                st.caption(f"{item['syntax_check']} · valid SMILES syntax does not confirm correct recognition")
-    fields = ["pdf", "page", "structure_id", "smiles", "canonical_smiles", "syntax_check"]
-    csv_file = io.StringIO()
-    writer = csv.DictWriter(csv_file, fieldnames=fields)
-    writer.writeheader()
-    writer.writerows({k: entry[k] for k in fields} for entry in records)
-    st.download_button("Download CSV", csv_file.getvalue(), "panChem_results.csv", "text/csv")
-    smi = "\n".join(f"{entry['smiles']}\tpage{entry['page']}_structure{entry['structure_id']}" for entry in records)
-    st.download_button("Download SMILES (.smi)", smi, "panChem_results.smi", "text/plain")
-    bundle = io.BytesIO()
-    with zipfile.ZipFile(bundle, "w") as zf:
-        zf.writestr("results.csv", csv_file.getvalue())
-        for entry in records:
-            image_bytes = io.BytesIO()
-            entry["image"].save(image_bytes, "PNG")
-            zf.writestr(f"page{entry['page']}_structure{entry['structure_id']}.png", image_bytes.getvalue())
-    st.download_button("Download CSV + images (ZIP)", bundle.getvalue(), "panChem_results.zip", "application/zip")
-    if st.button("Clear extracted results"):
-        st.session_state.results = []
-        st.rerun()
+    st.subheader(f"Results · {len(records)} structures")
+    export_rows = []
+    for n, rec in enumerate(records):
+        with st.expander(f"Page {rec['page']} · structure {rec['ordinal']}", expanded=n < 3):
+            a, b, c = st.columns([1, 2, 1])
+            with a:
+                st.image(rec["image"], caption="Detected structure", use_container_width=True)
+            with b:
+                rec["smiles"] = st.text_area("Review/edit predicted SMILES",
+                    rec["smiles"], key=f"smiles_{key}_{rec['page']}_{rec['ordinal']}")
+                check, normalized = syntax_check(rec["smiles"])
+                st.write(check)
+                if rec["error"]:
+                    st.warning(f"Recognition error: {rec['error']}")
+            with c:
+                mol = Chem.MolFromSmiles(rec["smiles"]) if normalized else None
+                if mol:
+                    st.image(Draw.MolToImage(mol, size=(300, 220)), caption="RDKit redraw")
+                else:
+                    st.caption("No redraw available")
+        check, canonical = syntax_check(rec["smiles"])
+        export_rows.append({
+            "pdf": upload.name, "page": rec["page"], "structure": rec["ordinal"],
+            "bbox_y0_x0_y1_x1": rec["bbox"], "predicted_smiles": rec["original_smiles"],
+            "reviewed_smiles": rec["smiles"], "canonical_smiles": canonical,
+            "syntax_check": check, "recognition_error": rec["error"]
+        })
 
-st.caption("MVP: manual cropping. Automatic page-wide segmentation and Markush enumeration are not included.")
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=list(export_rows[0]))
+    writer.writeheader()
+    writer.writerows(export_rows)
+    st.download_button("Download results CSV", buffer.getvalue(), "panChem_results.csv", mime="text/csv")
+    lines = "\n".join(f"{r['reviewed_smiles']}\tpage{r['page']}_structure{r['structure']}"
+                      for r in export_rows if r["canonical_smiles"])
+    st.download_button("Download valid SMILES (.smi)", lines, "panChem_structures.smi")
+    archive = io.BytesIO()
+    with ZipFile(archive, "w") as z:
+        z.writestr("results.csv", buffer.getvalue())
+        z.writestr("structures.smi", lines)
+        for rec in records:
+            z.writestr(f"images/page_{rec['page']}_structure_{rec['ordinal']}.png", rec["image"])
+    st.download_button("Download CSV + SMILES + images ZIP", archive.getvalue(),
+                       "panChem_extraction.zip", mime="application/zip")
+st.caption("DECIMER prediction is not chemical verification. Inspect stereochemistry, substituents and Markush labels before use.")
