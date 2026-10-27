@@ -125,7 +125,7 @@ if __name__=="__main__":
                 writer=csv.DictWriter(output,fieldnames=["page","structure","bbox","smiles","canonical_smiles","error","image"])
                 writer.writeheader()
                 writer.writerows(rows)
-            (outdir/"results.smi").write_text("\\n".join(f"{r['canonical_smiles']} page{r['page']}_{r['structure']}" for r in rows if r["canonical_smiles"]),encoding="utf-8")
+            (outdir/"results.smi").write_text("\n".join(f"{r['canonical_smiles']} page{r['page']}_{r['structure']}" for r in rows if r["canonical_smiles"]),encoding="utf-8")
             print(f"Completed {len(rows)} structures",flush=True)
         local_run(source,a.pages,Path(a.output))
     elif a.url:
