@@ -1,1 +1,0 @@
-panChem write diagnostic\n
