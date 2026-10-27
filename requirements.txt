@@ -1,6 +1,6 @@
 streamlit>=1.40,<2
 pypdfium2>=4.30,<6
 Pillow>=10,<13
-streamlit-image-coordinates>=0.1.9,<1
-decimer==2.8.1
+decimer-segmentation>=1.6.0
+decimer>=2.8.1
 rdkit>=2024.9
