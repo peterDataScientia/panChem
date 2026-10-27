@@ -2,3 +2,5 @@ streamlit>=1.40,<2
 requests>=2.31,<3
 pypdfium2>=4.30,<6
 Pillow>=10,<11
+
+rdkit>=2024.9,<2027
