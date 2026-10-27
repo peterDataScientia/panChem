@@ -11,6 +11,7 @@ import pypdfium2 as pdfium
 import requests
 import streamlit as st
 from PIL import Image
+from chemqa import assess, molecule_svg, rows_from_artifact, make_review_zip
 
 REPO = "peterDataScientia/panChem"
 API = f"https://api.github.com/repos/{REPO}"
@@ -161,12 +162,57 @@ if token:
                             st.download_button("Download results ZIP",blob,artifact["name"]+".zip",
                                                "application/zip",key=f"download-{aid}")
                             try:
-                                with zipfile.ZipFile(io.BytesIO(blob)) as z:
-                                    candidates=[n for n in z.namelist() if n.endswith("results.csv")]
-                                    if candidates:
-                                        rows=list(csv.DictReader(io.StringIO(z.read(candidates[0]).decode())))
-                                        st.dataframe(rows,use_container_width=True)
-                                        st.caption(f"{len(rows)} detected structures")
+                                extracted, images = rows_from_artifact(blob)
+                                st.caption(f"{len(extracted)} detected structures")
+                                edits_key = f"edits-{aid}"
+                                if edits_key not in st.session_state:
+                                    st.session_state[edits_key] = {}
+                                state = st.session_state[edits_key]
+                                export = []
+                                for index, original in enumerate(extracted):
+                                    rec = dict(original)
+                                    label = f"Page {rec.get('page')} · Structure {rec.get('structure')}"
+                                    name = rec.get("image", "")
+                                    img = images.get(name, next((data for p, data in images.items() if p.endswith("/"+name)), None))
+                                    with st.expander(label, expanded=index < 2):
+                                        a, b, c = st.columns([1, 2, 1])
+                                        with a:
+                                            if img:
+                                                st.image(img, caption="Original detected image", use_container_width=True)
+                                        with b:
+                                            value = st.text_area("Review or correct SMILES",
+                                                value=rec.get("smiles", ""),
+                                                key=f"edit-{aid}-{index}")
+                                            state[str(index)] = value
+                                            status, canonical, inchikey, mol = assess(value)
+                                            st.write("QA:", status)
+                                            if rec.get("error"):
+                                                st.warning("DECIMER recognition: " + rec["error"])
+                                            if status == "MARKUSH_REVIEW":
+                                                st.info("Variable substituent detected. Requires explicit chemical interpretation; not treated as a concrete molecule.")
+                                            if inchikey:
+                                                st.code(inchikey, language=None)
+                                        with c:
+                                            if mol:
+                                                st.image(molecule_svg(mol), caption="RDKit reconstruction")
+                                            else:
+                                                st.caption("No valid 2D structure to render")
+                                    status, canonical, inchikey, mol = assess(state[str(index)])
+                                    rec.update(original_smiles=original.get("smiles", ""),
+                                               reviewed_smiles=state[str(index)],
+                                               canonical_smiles=canonical,
+                                               inchikey=inchikey,
+                                               qa_status=status,
+                                               source_run_id=run_id)
+                                    export.append(rec)
+                                statuses = {}
+                                for rec in export:
+                                    statuses[rec["qa_status"]] = statuses.get(rec["qa_status"], 0) + 1
+                                st.write("Chemical QA summary", statuses)
+                                st.download_button("Download reviewed CSV, SMI, JSON and images",
+                                    make_review_zip(export, images), f"panChem_reviewed_{run_id}.zip",
+                                    mime="application/zip", key=f"reviewed-{aid}")
+
                             except Exception as exc:
                                 st.warning(f"Preview unavailable: {exc}")
     except Exception as exc:
