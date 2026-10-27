@@ -117,7 +117,7 @@ with st.sidebar:
             except requests.RequestException as exc:
                 st.error(f"Write diagnostic connection failed: {exc}")
     else:
-        st.warning("Add GITHUB_TOKEN in Streamlit App Settings → Secrets. GitHub token requires Contents read/write and Actions read/write permissions.")
+        st.warning("Add GITHUB_TOKEN in Streamlit App Settings → Secrets. GitHub token requires Contents read/write permission; Actions write is not required.")
     st.caption("PDFs uploaded to this public repository's jobs/ directory will be publicly accessible until removed.")
 
 uploaded = st.file_uploader("1. Upload scientific PDF", type="pdf")
@@ -151,11 +151,9 @@ if uploaded:
         try:
             with st.spinner("Uploading PDF and starting DECIMER job..."):
                 api_request("PUT", f"{API}/contents/{pdf_path}", token,
-                    json={"message": f"panChem PDF job {job_id}", "content": base64.b64encode(data).decode("ascii")})
-                api_request("POST", f"{API}/actions/workflows/{WORKFLOW}/dispatches", token,
-                    json={"ref":"main", "inputs":{"pdf_path":pdf_path,"pages":",".join(map(str,pages)), "job_id":job_id}})
+                    json={"message": f"panChem PDF job {job_id} pages={\",\".join(map(str,pages))}", "content": base64.b64encode(data).decode("ascii")})
             st.session_state["last_job_id"] = job_id
-            st.success(f"Submitted job {job_id}. Click Refresh jobs to check progress.")
+            st.success(f"Uploaded job {job_id}. GitHub Actions starts automatically on push; click Refresh jobs to check progress.")
         except Exception as exc:
             st.error(str(exc))
 
@@ -166,7 +164,7 @@ if token:
         st.rerun()
     try:
         runs = api_request("GET", f"{API}/actions/workflows/{WORKFLOW}/runs", token,
-                           params={"per_page": 25, "event": "workflow_dispatch"}).json().get("workflow_runs", [])
+                           params={"per_page": 25, "event": "push"}).json().get("workflow_runs", [])
         if not runs:
             st.info("No Actions jobs found yet.")
         for run in runs:
