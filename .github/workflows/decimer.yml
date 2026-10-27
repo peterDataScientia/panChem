@@ -3,7 +3,7 @@ on:
   push:
     branches: [main]
     paths:
-      - '.github/workflows/decimer.yml'
+      - 'jobs/**/paper.pdf'
   workflow_dispatch:
     inputs:
       pdf_path:
@@ -95,8 +95,25 @@ jobs:
           CUDA_VISIBLE_DEVICES: "-1"
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
-            # Complete manuscript matching the AKR1C3 Pippione paper in the user's Library.
-            python worker.py --url "https://iris.unito.it/bitstream/2318/1648089/2/Revised%20manuscript%20EJMECH-D-17-00778_4aperto.pdf" --pages "all" --output results
+            python - <<'PY'
+          import json, os, re, subprocess
+          from pathlib import Path
+          event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+          changed = []
+          for commit in event.get("commits", []):
+              changed.extend(commit.get("added", []))
+              changed.extend(commit.get("modified", []))
+          candidates = [p for p in changed if re.fullmatch(r"jobs/[0-9a-f]{12}/paper\.pdf", p)]
+          if len(candidates) != 1:
+              raise SystemExit(f"Expected one uploaded panChem PDF, got: {candidates}")
+          msg = event.get("head_commit", {}).get("message", "")
+          match = re.fullmatch(r"panChem PDF job ([0-9a-f]{12}) pages=([0-9,-]+)", msg.strip())
+          if not match or candidates[0] != f"jobs/{match.group(1)}/paper.pdf":
+              raise SystemExit("Invalid job metadata or PDF path")
+          pages = match.group(2)
+          print(f"Processing uploaded PDF: {candidates[0]} | pages={pages}", flush=True)
+          subprocess.check_call(["python", "worker.py", "--file", candidates[0], "--pages", pages, "--output", "results"])
+          PY
           elif [ -n "$PDF_PATH" ]; then
             python worker.py --file "$PDF_PATH" --pages "$PDF_PAGES" --output results
           else
