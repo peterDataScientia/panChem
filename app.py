@@ -2,6 +2,7 @@ import csv
 import hashlib
 import io
 import tempfile
+import traceback
 from pathlib import Path
 from zipfile import ZipFile
 
@@ -127,6 +128,8 @@ if st.button("🔎 Automatically extract structures and SMILES", type="primary",
             st.write(f"Page {page}: {len(found)} structures detected")
         except Exception as exc:
             st.error(f"Page {page} failed: {type(exc).__name__}: {exc}")
+            with st.expander(f"Technical traceback for page {page}"):
+                st.code(traceback.format_exc(), language="text")
         progress.progress((i + 1) / len(pages), text=f"Processed {i + 1}/{len(pages)} pages")
     st.session_state.extractions = all_records
     st.session_state.last_selection = pages
