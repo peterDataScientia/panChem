@@ -79,6 +79,76 @@ def parse_pages(expression: str, count: int):
         raise ValueError(f"Select pages between 1 and {count}.")
     return sorted(result)
 
+
+st.divider()
+st.subheader("GitHub Actions · Batch inference")
+st.caption("Run DECIMER on GitHub's CPU runner. Supply an HTTPS PDF URL that the runner can download. Unpublished or private PDFs should not use public links.")
+remote_url = st.text_input("PDF HTTPS URL (GitHub Actions)", key="actions_pdf_url", placeholder="https://example.org/paper.pdf")
+remote_pages = st.text_input("Pages (GitHub Actions)", value="1", key="actions_pages")
+try:
+    token = st.secrets.get("GITHUB_TOKEN", "")
+except Exception:
+    token = ""
+api_base = "https://api.github.com/repos/peterDataScientia/panChem"
+if not token:
+    st.info("To dispatch jobs from Streamlit, configure GITHUB_TOKEN in Streamlit secrets with Actions: write and Actions: read permissions for panChem.")
+else:
+    import requests
+    gh_headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+    if st.button("Run DECIMER on GitHub Actions", type="primary"):
+        from urllib.parse import urlparse
+        parsed = urlparse(remote_url)
+        if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+            st.error("Use a valid HTTPS PDF URL.")
+        elif not remote_pages.strip():
+            st.error("Specify the pages.")
+        else:
+            try:
+                response = requests.post(
+                    api_base + "/actions/workflows/decimer.yml/dispatches",
+                    headers=gh_headers,
+                    json={"ref": "main", "inputs": {"pdf_url": remote_url, "pages": remote_pages}},
+                    timeout=25,
+                )
+                response.raise_for_status()
+                st.success("Workflow dispatched. Check the run list below for status/results.")
+            except requests.RequestException as exc:
+                st.error(f"GitHub API dispatch error: {exc}")
+    if st.button("Refresh GitHub Actions jobs"):
+        st.session_state["actions_refresh"] = st.session_state.get("actions_refresh", 0) + 1
+    try:
+        runs_response = requests.get(api_base + "/actions/workflows/decimer.yml/runs",
+                                     headers=gh_headers, params={"per_page": 10}, timeout=20)
+        runs_response.raise_for_status()
+        for run in runs_response.json().get("workflow_runs", []):
+            run_id = run["id"]
+            status = run.get("conclusion") or run.get("status", "unknown")
+            with st.expander(f"Run {run_id}: {status} · {run.get('created_at', '')}"):
+                st.link_button("Open GitHub Actions run", run["html_url"])
+                if run.get("status") == "completed":
+                    resp = requests.get(api_base + f"/actions/runs/{run_id}/artifacts",
+                                        headers=gh_headers, timeout=20)
+                    if resp.ok:
+                        for artifact in resp.json().get("artifacts", []):
+                            if artifact.get("expired"):
+                                continue
+                            if st.button(f"Retrieve ZIP: {artifact['name']}", key=f"get_{artifact['id']}"):
+                                try:
+                                    download = requests.get(api_base + f"/actions/artifacts/{artifact['id']}/zip",
+                                                            headers=gh_headers, timeout=60)
+                                    download.raise_for_status()
+                                    st.session_state[f"artifact_{artifact['id']}"] = download.content
+                                except requests.RequestException as exc:
+                                    st.error(f"Artifact download failed: {exc}")
+                            content = st.session_state.get(f"artifact_{artifact['id']}")
+                            if content:
+                                st.download_button(f"Download {artifact['name']}.zip", content,
+                                                   f"{artifact['name']}.zip", "application/zip",
+                                                   key=f"save_{artifact['id']}")
+    except requests.RequestException as exc:
+        st.error(f"Could not load workflow status: {exc}")
+st.divider()
+
 upload = st.file_uploader("Upload research paper", type=["pdf"])
 if not upload:
     st.info("Upload a PDF and select the pages to extract. No cropping is required.")
