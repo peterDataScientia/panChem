@@ -1,0 +1,7 @@
+FROM python:3.11-slim-bookworm
+ENV DEBIAN_FRONTEND=noninteractive PIP_NO_CACHE_DIR=1 TF_CPP_MIN_LOG_LEVEL=2 CUDA_VISIBLE_DEVICES=-1
+RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /work
+COPY worker-requirements.txt /tmp/worker-requirements.txt
+RUN python -m pip install --upgrade pip && python -m pip install -r /tmp/worker-requirements.txt && python -c "import tensorflow, rdkit, decimer_segmentation, DECIMER; print('DECIMER image ready')"
+CMD ["python", "worker.py", "--help"]
