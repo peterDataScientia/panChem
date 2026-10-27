@@ -193,8 +193,11 @@ if token:
                                             if inchikey:
                                                 st.code(inchikey, language=None)
                                         with c:
-                                            if mol:
-                                                st.image(molecule_svg(mol), caption="RDKit reconstruction")
+                                            drawing = molecule_svg(mol) if mol else None
+                                            if drawing:
+                                                st.image(drawing, caption="RDKit reconstruction")
+                                            elif mol:
+                                                st.info("2D drawing unavailable on this deployment. SMILES validation remains enabled.")
                                             else:
                                                 st.caption("No valid 2D structure to render")
                                     status, canonical, inchikey, mol = assess(state[str(index)])
