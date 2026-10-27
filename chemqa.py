@@ -7,7 +7,8 @@ import zipfile
 from datetime import datetime, timezone
 
 from rdkit import Chem
-from rdkit.Chem import inchi, rdMolDraw2D
+from rdkit.Chem import inchi
+from rdkit.Chem.Draw import rdMolDraw2D
 
 MARKUSH = re.compile(r"\[(?:R\d*|X\d*|Y\d*|Z\d*|Ar\d*)\]|\bR\d+\b", re.IGNORECASE)
 
