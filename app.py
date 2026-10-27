@@ -9,7 +9,6 @@ import pypdfium2 as pdfium
 import streamlit as st
 from PIL import Image
 from rdkit import Chem
-from rdkit.Chem import Draw
 
 st.set_page_config(page_title="panChem | Automatic PDF to SMILES", page_icon="🧪", layout="wide")
 st.title("🧪 panChem")
@@ -155,7 +154,11 @@ if records:
             with c:
                 mol = Chem.MolFromSmiles(rec["smiles"]) if normalized else None
                 if mol:
-                    st.image(Draw.MolToImage(mol, size=(300, 220)), caption="RDKit redraw")
+                    from rdkit.Chem import rdMolDraw2D
+                    drawer = rdMolDraw2D.MolDraw2DSVG(300, 220)
+                    drawer.DrawMolecule(mol)
+                    drawer.FinishDrawing()
+                    st.image(drawer.GetDrawingText(), caption="RDKit redraw")
                 else:
                     st.caption("No redraw available")
         check, canonical = syntax_check(rec["smiles"])
