@@ -154,11 +154,14 @@ if records:
             with c:
                 mol = Chem.MolFromSmiles(rec["smiles"]) if normalized else None
                 if mol:
-                    from rdkit.Chem import rdMolDraw2D
-                    drawer = rdMolDraw2D.MolDraw2DSVG(300, 220)
-                    drawer.DrawMolecule(mol)
-                    drawer.FinishDrawing()
-                    st.image(drawer.GetDrawingText(), caption="RDKit redraw")
+                    try:
+                        from rdkit.Chem import rdMolDraw2D
+                        drawer = rdMolDraw2D.MolDraw2DSVG(300, 220)
+                        drawer.DrawMolecule(mol)
+                        drawer.FinishDrawing()
+                        st.image(drawer.GetDrawingText(), caption="RDKit redraw")
+                    except (ImportError, OSError) as exc:
+                        st.caption(f"RDKit drawing unavailable on this server: {exc}")
                 else:
                     st.caption("No redraw available")
         check, canonical = syntax_check(rec["smiles"])
