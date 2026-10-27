@@ -71,6 +71,20 @@ with st.sidebar:
     st.link_button("Open Actions", f"https://github.com/{REPO}/actions/workflows/{WORKFLOW}")
     if token:
         st.success("GitHub token configured")
+        if st.button("Diagnose GitHub token permissions"):
+            try:
+                auth = api_request("GET", "https://api.github.com/user", token).json()
+                repo_info = api_request("GET", API, token).json()
+                st.write("Authenticated GitHub account:", auth.get("login", "unknown"))
+                st.write("Repository:", repo_info.get("full_name", "unknown"))
+                st.json(repo_info.get("permissions", {}))
+                response = requests.get(f"{API}/contents/README.md",
+                    headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
+                    timeout=20)
+                st.write("Contents read status:", response.status_code)
+                st.caption("The token is never printed. A 403 on upload despite repository read access typically means insufficient effective Contents write permission or an outdated token in Streamlit Secrets.")
+            except Exception as exc:
+                st.error(f"Authentication diagnostic failed: {exc}")
     else:
         st.warning("Add GITHUB_TOKEN in Streamlit App Settings → Secrets. GitHub token requires Contents read/write and Actions read/write permissions.")
     st.caption("PDFs uploaded to this public repository's jobs/ directory will be publicly accessible until removed.")
