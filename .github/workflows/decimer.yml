@@ -37,6 +37,8 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - name: Restore DECIMER model cache
         uses: actions/cache@v4
         with:
@@ -90,23 +92,20 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
             python - <<'PY'
-          import json, os, re, subprocess
-          from pathlib import Path
-          event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
-          changed = []
-          for commit in event.get("commits", []):
-              changed.extend(commit.get("added", []))
-              changed.extend(commit.get("modified", []))
-          candidates = [p for p in changed if re.fullmatch(r"jobs/[0-9a-f]{12}/paper\.pdf", p)]
-          if len(candidates) != 1:
-              raise SystemExit(f"Expected one uploaded panChem PDF, got: {candidates}")
-          msg = event.get("head_commit", {}).get("message", "")
-          match = re.fullmatch(r"panChem PDF job ([0-9a-f]{12}) pages=([0-9,-]+)", msg.strip())
-          if not match or candidates[0] != f"jobs/{match.group(1)}/paper.pdf":
-              raise SystemExit("Invalid job metadata or PDF path")
-          pages = match.group(2)
-          print(f"Processing uploaded PDF: {candidates[0]} | pages={pages}", flush=True)
-          subprocess.check_call(["python", "worker.py", "--file", candidates[0], "--pages", pages, "--output", "results"])
+          import re, subprocess
+          msg = subprocess.check_output(["git", "log", "-1", "--format=%B"], text=True).strip()
+          match = re.fullmatch(r"panChem PDF job ([0-9a-f]{12}) pages=([0-9,-]+)", msg)
+          if not match:
+              raise SystemExit(f"Unexpected commit message: {msg!r}")
+          pdf_path = f"jobs/{match.group(1)}/paper.pdf"
+          changed = subprocess.check_output(
+              ["git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"], text=True
+          ).splitlines()
+          if pdf_path not in changed:
+              raise SystemExit(f"Uploaded PDF not present in changed files: {changed}")
+          print(f"Processing uploaded PDF: {pdf_path} | pages={match.group(2)}", flush=True)
+          subprocess.check_call(["python", "worker.py", "--file", pdf_path,
+                                 "--pages", match.group(2), "--output", "results"])
           PY
           elif [ -n "$PDF_PATH" ]; then
             python worker.py --file "$PDF_PATH" --pages "$PDF_PAGES" --output results
