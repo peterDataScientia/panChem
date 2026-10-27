@@ -158,6 +158,59 @@ if uploaded:
         except Exception as exc:
             st.error(str(exc))
 
+@st.fragment(run_every="10s")
+def live_progress():
+    st.subheader("Live extraction monitor")
+    if not token:
+        st.info("Configure GitHub token to enable live progress.")
+        return
+    try:
+        response = api_request("GET", f"{API}/actions/workflows/{WORKFLOW}/runs",
+                               token, params={"per_page": 20, "event": "push"}).json()
+        runs = response.get("workflow_runs", [])
+        wanted = st.session_state.get("last_job_id")
+        target = next((r for r in runs if wanted and
+                       f"panChem PDF job {wanted} " in (r.get("head_commit") or {}).get("message", "")), None)
+        if target is None and wanted:
+            st.info(f"Job {wanted}: waiting for GitHub to register the run. Automatic refresh every 10 seconds.")
+            return
+        if target is None:
+            st.caption("Submit a PDF to track its progress live.")
+            return
+        rid = target["id"]
+        status = target.get("conclusion") or target.get("status", "unknown")
+        st.write(f"**Job {wanted} · Run #{rid} · {status.upper()}**")
+        st.link_button("Open full GitHub logs", target["html_url"])
+        job_payload = api_request("GET", f"{API}/actions/runs/{rid}/jobs",
+                                  token, params={"per_page": 30}).json()
+        jobs = job_payload.get("jobs", [])
+        steps = [step for job in jobs for step in job.get("steps", [])]
+        relevant = [step for step in steps if not step.get("name", "").startswith(("Post ", "Complete job"))]
+        finished = sum(step.get("status") == "completed" for step in relevant)
+        total = len(relevant)
+        st.progress(finished / total if total else 0,
+                    text=f"Pipeline steps: {finished}/{total} complete")
+        active = next((step for step in relevant if step.get("status") == "in_progress"), None)
+        if active:
+            st.info("Currently running: " + active["name"])
+        elif status == "queued":
+            st.info("Waiting for a GitHub runner")
+        elif status == "success":
+            st.success("DECIMER job finished. Retrieve the artifact below.")
+        elif status == "failure":
+            st.error("Job failed. Open GitHub logs to inspect the error.")
+        if steps:
+            with st.expander("Pipeline stages", expanded=status != "success"):
+                for step in relevant:
+                    state = step.get("conclusion") or step.get("status", "pending")
+                    mark = "✅" if state == "success" else ("❌" if state == "failure" else ("🔄" if state == "in_progress" else "⏳"))
+                    st.write(f"{mark} {step['name']} — {state}")
+        st.caption("Updates every 10 seconds. Step progress reflects GitHub Actions stages, not an estimated percentage of PDF pages.")
+    except Exception as exc:
+        st.warning(f"Live monitor temporarily unavailable: {exc}")
+
+live_progress()
+
 st.divider()
 st.subheader("Job status and downloads")
 if token:
