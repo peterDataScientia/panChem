@@ -31,7 +31,7 @@ def api_request(method, url, token, **kwargs):
                "X-GitHub-Api-Version": "2022-11-28"}
     response = requests.request(method, url, headers=headers, timeout=90, **kwargs)
     if not response.ok:
-        raise RuntimeError(f"GitHub API {response.status_code}: {response.text[:500]}")
+        raise RuntimeError(f"GitHub API {response.status_code}: {response.text[:500]} | Required permissions: {response.headers.get('X-Accepted-GitHub-Permissions', 'not reported')}")
     return response
 
 def pages_list(spec, count):
@@ -83,9 +83,39 @@ with st.sidebar:
                     headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
                     timeout=20)
                 st.write("Contents read status:", response.status_code)
-                st.caption("The token is never printed. A 403 on upload despite repository read access typically means insufficient effective Contents write permission or an outdated token in Streamlit Secrets.")
+                st.caption("Account push permission does not guarantee fine-grained PAT Contents write access.")
             except Exception as exc:
                 st.error(f"Authentication diagnostic failed: {exc}")
+        if st.button("Test Contents WRITE permission", key="write-probe"):
+            probe_path = f"jobs/permission-probe-{uuid.uuid4().hex[:10]}.txt"
+            headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
+                       "X-GitHub-Api-Version": "2022-11-28"}
+            try:
+                response = requests.put(f"{API}/contents/{probe_path}", headers=headers,
+                    json={"message": "panChem permission diagnostic", "content": base64.b64encode(b"panChem write diagnostic\\n").decode("ascii")},
+                    timeout=45)
+                st.write("Actual Contents WRITE status:", response.status_code)
+                st.write("GitHub required permission:", response.headers.get("X-Accepted-GitHub-Permissions", "Not provided"))
+                st.write("OAuth scopes:", response.headers.get("X-OAuth-Scopes", "Not provided"))
+                if response.status_code == 201:
+                    st.success("Contents write works. Upload authorization is not the blocker for this token.")
+                    try:
+                        sha = response.json()["content"]["sha"]
+                        cleanup = requests.delete(f"{API}/contents/{probe_path}", headers=headers,
+                            json={"message": "Remove panChem permission probe", "sha": sha}, timeout=45)
+                        st.caption(f"Probe cleanup status: {cleanup.status_code}")
+                    except Exception as cleanup_error:
+                        st.warning(f"Probe cleanup failed: {cleanup_error}")
+                else:
+                    try:
+                        payload = response.json()
+                        st.error(f"GitHub message: {payload.get('message', response.reason)}")
+                        st.caption(str(payload.get("documentation_url", "")))
+                    except ValueError:
+                        st.error(f"GitHub response: {response.reason}")
+                    st.info("If status is 403, check the token's repository selection, effective Contents: Read and write permission, pending approval, and whether Streamlit Secrets holds the latest token.")
+            except requests.RequestException as exc:
+                st.error(f"Write diagnostic connection failed: {exc}")
     else:
         st.warning("Add GITHUB_TOKEN in Streamlit App Settings → Secrets. GitHub token requires Contents read/write and Actions read/write permissions.")
     st.caption("PDFs uploaded to this public repository's jobs/ directory will be publicly accessible until removed.")
