@@ -148,10 +148,11 @@ if uploaded:
     if st.button("3. Extract all structures with GitHub Actions", type="primary", disabled=not token or not pages):
         job_id = uuid.uuid4().hex[:12]
         pdf_path = f"jobs/{job_id}/paper.pdf"
+        page_spec = ",".join(map(str, pages))
         try:
             with st.spinner("Uploading PDF and starting DECIMER job..."):
                 api_request("PUT", f"{API}/contents/{pdf_path}", token,
-                    json={"message": f"panChem PDF job {job_id} pages={\",\".join(map(str,pages))}", "content": base64.b64encode(data).decode("ascii")})
+                    json={"message": f"panChem PDF job {job_id} pages={page_spec}", "content": base64.b64encode(data).decode("ascii")})
             st.session_state["last_job_id"] = job_id
             st.success(f"Uploaded job {job_id}. GitHub Actions starts automatically on push; click Refresh jobs to check progress.")
         except Exception as exc:
