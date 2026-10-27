@@ -1,23 +1,25 @@
 # panChem
 
-Streamlit PDF chemical-structure recognition app powered by DECIMER.
+Automatic PDF-to-SMILES extraction in Streamlit using **DECIMER Image Segmentation** and **DECIMER Image Transformer**.
 
 ## Features
-- Upload PDF (up to 25 MB) and select a numbered page.
-- Draw a crop by clicking its top-left and bottom-right corners.
-- Predict SMILES via DECIMER, validate SMILES syntax using RDKit, and manually edit results.
-- Export CSV, SMI, and cropped structure images in a ZIP.
+- Upload PDF and choose pages using a list/range such as `2,5,8-10`.
+- Preview any PDF page.
+- Detect **all** chemical structure depictions on each chosen page, without manual cropping.
+- Run DECIMER recognition for each detected image.
+- Visually compare detection with RDKit redraw and edit predicted SMILES.
+- Export CSV, SMI and ZIP with detected images and page/bounding-box provenance.
 
-## Run
-Python 3.10 or 3.11 recommended.
+## Running
+Recommended: Python 3.10 or 3.11.
 
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Deploy
-On Streamlit Community Cloud, select `peterDataScientia/panChem`, branch `main`, entrypoint `app.py`. DECIMER includes a large model and may exceed free-tier disk/RAM constraints. In that case use a more capable host or dedicated inference backend.
+## Streamlit Cloud
+Repository `peterDataScientia/panChem`, branch `main`, main file `app.py`. DECIMER includes substantial TensorFlow model downloads; free hosting may run out of memory. Prefer a more capable runtime or a GPU service for heavy PDFs.
 
 ## Limitations
-Automatic page-wide structure detection and Markush R-group enumeration are **not** implemented in this MVP. SMILES syntax validation is not proof of chemical correctness. Verify all chemical structures visually before research use.
+This version detects all structures on **selected pages**, and handles failed pages independently. A valid SMILES string may still differ chemically from the figure. Complex Markush R groups may need separate enumeration and verification. No manual crop is required.
