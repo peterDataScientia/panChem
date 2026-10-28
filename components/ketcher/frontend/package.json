@@ -12,7 +12,8 @@
     "ketcher-react": "3.18.0",
     "ketcher-standalone": "3.18.0",
     "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "react-dom": "18.3.1",
+    "events": "3.3.0"
   },
   "devDependencies": {
     "vite": "6.3.5"
