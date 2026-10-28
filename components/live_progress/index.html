@@ -42,6 +42,7 @@ function openStream(target){
       msg.textContent=description;
       tell("streamlit:setComponentValue",{value:{
         id:packet.id,topic:topic,stage:data.stage,
+        run_id:Number(data.run_id||0),
         page:Number(data.page||0),total_pages:Number(data.total_pages||0),
         completed_pages:Number(data.completed_pages||0),
         structures:Number(data.structures||0),page_structures:Number(data.page_structures||0)
