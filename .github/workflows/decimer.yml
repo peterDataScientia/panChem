@@ -45,7 +45,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.data
-          key: panchem-decimer-models-v2
+          key: panchem-decimer-models-v1
       - name: Download DECIMER models with retries
         id: model_weights
         env:
@@ -87,7 +87,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ~/.data
-          key: panchem-decimer-models-v2
+          key: panchem-decimer-models-v1
       - name: Verify versions
         run: |
           python -c "import numpy, tensorflow, cv2; print('NumPy',numpy.__version__,'TF',tensorflow.__version__,'OpenCV',cv2.__version__)"
