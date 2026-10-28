@@ -116,15 +116,15 @@ with tempfile.TemporaryDirectory() as tmp:
         worker, "fetch_pdf", side_effect=lambda url, destination:
             destination.write_bytes(b"%PDF-1.7\n")
     ), patch.object(worker, "publish", return_value=True), patch.dict(
-        os.environ, {"PANCHEM_PARALLEL_MODEL_PRELOAD": "1"}
+        os.environ, {"PANCHEM_PARALLEL_MODEL_PRELOAD": ""}
     ):
         worker.run("https://example.org/test.pdf", "1", output)
     result = json.loads(Path(output, "performance.json").read_text())
     assert result["total_structures"] == 2
     assert result["valid_smiles"] == 2
-    assert result["recognition_preload_enabled"]
+    assert not result["recognition_preload_enabled"]
     assert result["recognition_cache_hits"] == 1
-    assert len(preload_calls) == 1
+    assert len(preload_calls) == 0
     assert len(recognition_calls) == 1, "Duplicate image should not be inferred twice"
     assert len(result["pages"]) == 1
     assert result["prediction_timings"][0]["cache_hit"] is False
@@ -151,14 +151,14 @@ with tempfile.TemporaryDirectory() as tmp:
         }), patch.object(worker.pdfium, "PdfDocument", DummyDoc), patch.object(
             sys, "argv", ["worker.py", "--file", str(local_pdf),
                           "--pages", "1", "--output", str(local_output)]
-        ), patch.dict(os.environ, {"PANCHEM_PARALLEL_MODEL_PRELOAD": "0"}):
+        ), patch.dict(os.environ, {"PANCHEM_PARALLEL_MODEL_PRELOAD": "1"}):
             runpy.run_path(str(worker_script), run_name="__main__")
         local_result = json.loads(Path(local_output, "performance.json").read_text())
         assert local_result["total_structures"] == 2
         assert local_result["recognition_cache_hits"] == 1
-        assert not local_result["recognition_preload_enabled"]
+        assert local_result["recognition_preload_enabled"]
         assert len(recognition_calls) == 2, "Cache must reset for each PDF job"
-        assert len(preload_calls) == 1, "Opt-out should not start background loading"
+        assert len(preload_calls) == 1, "Explicit opt-in should preload recognition once"
         assert Path(local_output, "results.csv").is_file()
         assert Path(local_output, "page_1_structure_1.png").is_file()
         assert Path(local_output, "page_1_structure_2.png").is_file()
@@ -171,4 +171,4 @@ assert workflow.index("name: Save complete DECIMER model cache after inference")
 assert "panchem-decimer-models-v2-tf215-decimer281" in workflow
 assert "PANCHEM_PARALLEL_MODEL_PRELOAD:" in workflow
 assert "performance_diagnostics_panel()" in Path("app.py").read_text()
-print("Optimized DECIMER inference, pixel caching, preload switch, timings and artifacts: PASSED")
+print("Serial-default inference, optional preload, caching and timings: PASSED")
