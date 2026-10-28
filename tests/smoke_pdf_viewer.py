@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 
+from pathlib import Path
 from pdf_viewer import full_page_viewer
 
 
@@ -17,6 +18,10 @@ assert 'const startPage = 3;' in html
 assert "requestFullscreen" in html
 assert "fullscreenchange" in html
 assert "Slide PDF pages" in html
+assert 'mode = "page", zoom = 1.0' in html
+assert 'id="range" type="range"' in html
+assert 'id="full"' in html
+assert 'id="pageInput"' in html
 assert "Fit width" in html and "Fit page" in html
 assert "touchend" in html and "ArrowRight" in html
 assert "3.11.174/pdf.min.js" in html
@@ -35,4 +40,8 @@ result = subprocess.run(
     capture_output=True, check=False,
 )
 assert result.returncode == 0, result.stderr
-print("PDF viewer JS syntax, full-page controls and binary embedding: PASSED")
+app = Path("app.py").read_text(encoding="utf-8")
+assert 'components.html(\n        full_page_viewer(data)' in app
+assert 'st.slider(' not in app, "PDF slider must be inside the interactive preview"
+assert 'st.toggle(' not in app, "Preview should be interactive by default"
+print("Default interactive full-page PDF preview, integrated slider and JS syntax: PASSED")
