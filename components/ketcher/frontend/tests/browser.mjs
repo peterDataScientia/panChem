@@ -29,10 +29,19 @@ try {
   browser = await chromium.launch({executablePath, headless:true, args:['--no-sandbox']});
   const page = await browser.newPage({viewport:{width:1220,height:850}});
   const errors = [];
-  page.on('pageerror', error => errors.push(error.message));
+  page.on('pageerror', error => errors.push('PAGE: '+error.stack));
+  page.on('console', message => { if (message.type()==='error') errors.push('CONSOLE: '+message.text()); });
+  page.on('requestfailed', req => errors.push('NETWORK: '+req.url()+' '+(req.failure()?.errorText||'')));
   await page.goto('http://127.0.0.1:4178/', {waitUntil:'domcontentloaded'});
-  await page.waitForFunction(() => !!window.ketcher && typeof window.ketcher.setMolecule === 'function',
-    null, {timeout:120000});
+  try {
+    await page.waitForFunction(() => !!window.ketcher && typeof window.ketcher.setMolecule === 'function',
+      null, {timeout:45000});
+  } catch (error) {
+    console.error('Ketcher did not initialize. Browser errors:', errors.slice(-30));
+    console.error('Visible browser body:', (await page.locator('body').innerText()).slice(0,3000));
+    await page.screenshot({path:'ketcher-browser-failure.png',fullPage:true});
+    throw error;
+  }
   assert.ok(await page.getByRole('button', {name:'Apply structure'}).count(), 'Apply button missing');
   const result = await page.evaluate(async () => {
     await window.ketcher.setMolecule('CCO');
