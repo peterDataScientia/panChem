@@ -154,6 +154,7 @@ if uploaded:
                 api_request("PUT", f"{API}/contents/{pdf_path}", token,
                     json={"message": f"panChem PDF job {job_id} pages={page_spec}", "content": base64.b64encode(data).decode("ascii")})
             st.session_state["last_job_id"] = job_id
+            st.session_state.pop("manual_view_run_id", None)
             st.session_state.pop("active_artifact_id", None)
             st.session_state.pop("active_artifact_name", None)
             st.session_state.pop("active_run_id", None)
@@ -267,7 +268,8 @@ def live_progress():
                 st.session_state[cache_key] = api_request(
                     "GET", f"{API}/actions/artifacts/{aid}/zip", token,
                 ).content
-            if st.session_state.get("active_artifact_id") != aid:
+            if (st.session_state.get("manual_view_run_id") is None
+                    and st.session_state.get("active_artifact_id") != aid):
                 st.session_state["active_artifact_id"] = aid
                 st.session_state["active_artifact_name"] = artifact["name"]
                 st.session_state["active_run_id"] = run_id
@@ -403,6 +405,7 @@ def recent_jobs():
                             st.session_state[f"artifact-{aid}"] = api_request(
                                 "GET", f"{API}/actions/artifacts/{aid}/zip", token,
                             ).content
+                        st.session_state["manual_view_run_id"] = selected
                         st.session_state["active_artifact_id"] = aid
                         st.session_state["active_artifact_name"] = art["name"]
                         st.session_state["active_run_id"] = selected
