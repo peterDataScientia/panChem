@@ -52,6 +52,7 @@ function KetcherBridge() {
 
   const handleInit = useCallback((instance) => {
     editorRef.current = instance;
+    window.ketcher = instance;
     setReady(true);
     loadInitial();
   }, [loadInitial]);
