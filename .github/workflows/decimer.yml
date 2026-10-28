@@ -40,6 +40,9 @@ jobs:
         with:
           ref: ${{ github.sha }}
           fetch-depth: 1
+      - name: Announce job started
+        if: ${{ github.event_name == 'push' }}
+        run: python progress_events.py starting
       - name: Restore DECIMER model cache
         id: model_cache
         uses: actions/cache/restore@v4
@@ -112,8 +115,10 @@ jobs:
           if not pdf_path.is_file():
               raise SystemExit(f"Uploaded PDF missing: {pdf_path}")
           print(f"Processing uploaded PDF: {pdf_path} | pages={match.group(2)}", flush=True)
+          environment = os.environ.copy()
+          environment["PANCHEM_PROGRESS_TOPIC"] = "panchem-" + match.group(1)
           subprocess.check_call(["python", "worker.py", "--file", str(pdf_path),
-                                 "--pages", match.group(2), "--output", "results"])
+                                 "--pages", match.group(2), "--output", "results"], env=environment)
           PY
           elif [ -n "$PDF_PATH" ]; then
             python worker.py --file "$PDF_PATH" --pages "$PDF_PAGES" --output results
@@ -130,3 +135,9 @@ jobs:
             results/page_*_structure_*.png
           retention-days: 7
           if-no-files-found: warn
+      - name: Notify results available
+        if: ${{ success() && github.event_name == 'push' }}
+        run: python progress_events.py results_ready
+      - name: Notify job failed
+        if: ${{ failure() && github.event_name == 'push' }}
+        run: python progress_events.py failed
