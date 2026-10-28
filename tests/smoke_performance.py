@@ -88,10 +88,25 @@ class DummyDoc:
 fake_segmentation = ModuleType("decimer_segmentation")
 fake_segmentation.segment_chemical_structures_from_file = (
     lambda filename, expand, return_bboxes:
-        ([np.zeros((8, 8, 3), dtype=np.uint8)], [(0, 0, 8, 8)])
+        ([np.zeros((8, 8, 3), dtype=np.uint8)] * 2,
+         [(0, 0, 8, 8), (8, 8, 16, 16)])
 )
 fake_recognition = ModuleType("DECIMER")
-fake_recognition.predict_SMILES = lambda filename: "CCO"
+recognition_calls = []
+preload_calls = []
+
+def fake_predict(image):
+    assert isinstance(image, np.ndarray), "Must pass pixels directly, not a PNG filename"
+    assert image.dtype == np.uint8 and image.shape == (8, 8, 3)
+    recognition_calls.append(image.copy())
+    return "CCO"
+
+def fake_preload(printed=True, hand_drawn=False):
+    assert printed and not hand_drawn
+    preload_calls.append(True)
+
+fake_recognition.predict_SMILES = fake_predict
+fake_recognition.load_models = fake_preload
 
 with tempfile.TemporaryDirectory() as tmp:
     output = Path(tmp, "remote")
@@ -100,12 +115,20 @@ with tempfile.TemporaryDirectory() as tmp:
     }), patch.object(worker.pdfium, "PdfDocument", DummyDoc), patch.object(
         worker, "fetch_pdf", side_effect=lambda url, destination:
             destination.write_bytes(b"%PDF-1.7\n")
-    ), patch.object(worker, "publish", return_value=True):
+    ), patch.object(worker, "publish", return_value=True), patch.dict(
+        os.environ, {"PANCHEM_PARALLEL_MODEL_PRELOAD": "1"}
+    ):
         worker.run("https://example.org/test.pdf", "1", output)
     result = json.loads(Path(output, "performance.json").read_text())
-    assert result["total_structures"] == 1
-    assert result["valid_smiles"] == 1
+    assert result["total_structures"] == 2
+    assert result["valid_smiles"] == 2
+    assert result["recognition_preload_enabled"]
+    assert result["recognition_cache_hits"] == 1
+    assert len(preload_calls) == 1
+    assert len(recognition_calls) == 1, "Duplicate image should not be inferred twice"
     assert len(result["pages"]) == 1
+    assert result["prediction_timings"][0]["cache_hit"] is False
+    assert result["prediction_timings"][1]["cache_hit"] is True
     assert Path(output, "results.csv").is_file()
     assert Path(output, "results.smi").read_text().startswith("CCO ")
 
@@ -123,14 +146,20 @@ with tempfile.TemporaryDirectory() as tmp:
         }), patch.object(worker.pdfium, "PdfDocument", DummyDoc), patch.object(
             sys, "argv", ["worker.py", "--file", str(local_pdf),
                           "--pages", "1", "--output", str(local_output)]
-        ):
+        ), patch.dict(os.environ, {"PANCHEM_PARALLEL_MODEL_PRELOAD": "0"}):
             runpy.run_path(str(worker_script), run_name="__main__")
         local_result = json.loads(Path(local_output, "performance.json").read_text())
-        assert local_result["total_structures"] == 1
+        assert local_result["total_structures"] == 2
+        assert local_result["recognition_cache_hits"] == 1
+        assert not local_result["recognition_preload_enabled"]
+        assert len(recognition_calls) == 2, "Cache must reset for each PDF job"
+        assert len(preload_calls) == 1, "Opt-out should not start background loading"
         assert Path(local_output, "results.csv").is_file()
+        assert Path(local_output, "page_1_structure_1.png").is_file()
+        assert Path(local_output, "page_1_structure_2.png").is_file()
     finally:
         os.chdir(cwd)
 
 assert "results/performance.json" in Path(".github/workflows/decimer.yml").read_text()
 assert "performance_diagnostics_panel()" in Path("app.py").read_text()
-print("DECIMER worker timings, artifact parsing and GitHub timestamps: PASSED")
+print("Optimized DECIMER inference, pixel caching, preload switch, timings and artifacts: PASSED")
