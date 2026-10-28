@@ -132,6 +132,7 @@ jobs:
           path: |
             results/results.csv
             results/results.smi
+            results/performance.json
             results/page_*_structure_*.png
           retention-days: 7
           if-no-files-found: warn
