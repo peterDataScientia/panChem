@@ -563,13 +563,9 @@ def performance_diagnostics_panel():
                 "github": reports,
                 "note": "Performance measurements only; not a chemical accuracy validation.",
             }
-            st.download_button(
-                "Download timing report (JSON)",
-                json.dumps(payload, indent=2).encode("utf-8"),
-                file_name=f"panChem_performance_{current_run or 'builds'}.json",
-                mime="application/json",
-                key="perf-report-download",
-            )
+            with st.popover("Copy timing report"):
+                st.caption("Use the copy icon in the upper-right corner to copy the full report.")
+                st.code(json.dumps(payload, indent=2), language="json", wrap_lines=True)
 
 
 recent_jobs()
