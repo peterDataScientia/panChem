@@ -4,6 +4,8 @@ on:
     branches: [main]
     paths:
       - 'app.py'
+      - 'ketcher_review.py'
+      - 'tests/smoke_ketcher.py'
       - 'time_utils.py'
       - 'tests/smoke_time_eat.py'
       - 'chemqa.py'
@@ -35,11 +37,13 @@ jobs:
       - name: Install frontend dependencies
         run: python -m pip install -r requirements.txt
       - name: Check Python syntax
-        run: python -m compileall -q app.py time_utils.py chemqa.py pdf_viewer.py progress_events.py tests/smoke_2d.py tests/smoke_pdf_viewer.py tests/smoke_realtime.py tests/smoke_time_eat.py
+        run: python -m compileall -q ketcher_review.py app.py time_utils.py chemqa.py pdf_viewer.py progress_events.py tests/smoke_2d.py tests/smoke_pdf_viewer.py tests/smoke_realtime.py tests/smoke_time_eat.py
       - name: Verify native and fallback molecular 2D drawing
         run: PYTHONPATH=. python tests/smoke_2d.py
       - name: Verify fullscreen PDF control HTML and JavaScript
         run: PYTHONPATH=. python tests/smoke_pdf_viewer.py
+      - name: Verify Ketcher save and chemical export
+        run: PYTHONPATH=. python tests/smoke_ketcher.py
       - name: Verify real-time SSE event bridge
         run: PYTHONPATH=. python tests/smoke_realtime.py
       - name: Verify East Africa Time labels
