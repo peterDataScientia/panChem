@@ -333,9 +333,12 @@ if artifact_id:
                     with c:
                         drawing = molecule_svg(mol) if mol else None
                         if drawing:
-                            st.image(drawing, caption="RDKit reconstruction")
+                            st.image(drawing, caption="2D structure from reviewed SMILES", use_container_width=True)
+                            st.download_button("Download 2D SVG", drawing.encode("utf-8"),
+                                file_name=f"panChem_{run_id}_page{rec.get('page')}_structure{rec.get('structure')}.svg",
+                                mime="image/svg+xml", key=f"svg-{artifact_id}-{index}")
                         elif mol:
-                            st.info("2D renderer unavailable. SMILES validation remains enabled.")
+                            st.warning("2D rendering failed. Check application logs for RDKit or SVG errors.")
                         else:
                             st.caption("No valid 2D molecule")
                 qa_status, canonical, inchikey, mol = assess(state[str(index)])
