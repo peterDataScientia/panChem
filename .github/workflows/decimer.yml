@@ -83,7 +83,7 @@ jobs:
                       time.sleep(min(attempt * 10, 40))
           PY
       - name: Save DECIMER model cache immediately
-        if: success() && steps.decimer-cache.outputs.cache-hit != 'true'
+        if: success() && steps.model_cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: ~/.data
@@ -120,12 +120,6 @@ jobs:
           else
             python worker.py --url "$PDF_URL" --pages "$PDF_PAGES" --output results
           fi
-      - name: Save DECIMER model cache
-        if: ${{ always() && steps.model_weights.outcome == 'success' && steps.model_cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.data
-          key: panchem-decimer-models-v2
       - uses: actions/upload-artifact@v4
         if: always()
         with:
