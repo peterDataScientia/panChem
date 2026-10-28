@@ -6,6 +6,7 @@ on:
       - Dockerfile.worker
       - worker-requirements.txt
       - .github/workflows/build-worker.yml
+      - .dockerignore
   workflow_dispatch:
 permissions:
   contents: read
@@ -29,5 +30,11 @@ jobs:
           file: Dockerfile.worker
           push: true
           tags: ghcr.io/peterdatascientia/panchem-decimer-worker:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Import cache metadata from the previously published image.
+          # Keep the old GHA cache as a migration fallback only.
+          cache-from: |
+            type=registry,ref=ghcr.io/peterdatascientia/panchem-decimer-worker:latest
+            type=gha
+          # Inline metadata is exported with the image: no second large
+          # upload of the layers to the GitHub Actions cache service.
+          cache-to: type=inline
