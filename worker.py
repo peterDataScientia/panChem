@@ -71,8 +71,7 @@ def _pixel_key(image):
     return digest.digest()
 
 
-def _recognize(image, predict_smiles, cache):
-    key = _pixel_key(image)
+def _recognize(image, predict_smiles, cache, key):
     if key in cache:
         smiles, canonical = cache[key]
         return smiles, canonical, "", True
@@ -163,7 +162,7 @@ def process_document(pdf_path, pages, outdir, perf):
 
                 started = perf.now()
                 smiles, canonical, error, cached = _recognize(
-                    image_array, DECIMER.predict_SMILES, prediction_cache
+                    image_array, DECIMER.predict_SMILES, prediction_cache, key
                 )
                 seconds = perf.elapsed(started)
                 recognition_seconds += seconds
