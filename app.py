@@ -16,10 +16,15 @@ from PIL import Image
 from chemqa import assess, molecule_svg, rows_from_artifact, make_review_zip
 from pdf_viewer import full_page_viewer
 from time_utils import format_eat
+from ketcher_review import validated_ketcher_result, initial_molfile, result_molfile
 
 _live_events = components.declare_component(
     "panchem_live_events", path=str(Path(__file__).parent / "components" / "live_progress")
 )
+
+_ketcher_dist = Path(__file__).parent / "components" / "ketcher" / "dist"
+_ketcher = (components.declare_component("panchem_ketcher", path=str(_ketcher_dist))
+            if (_ketcher_dist / "index.html").is_file() else None)
 
 REPO = "peterDataScientia/panChem"
 API = f"https://api.github.com/repos/{REPO}"
@@ -249,6 +254,44 @@ if artifact_id:
                     ),
                 )
                 with st.expander(label, expanded=index < 2):
+                    edit_key = f"edit-{artifact_id}-{index}"
+                    drawing_key = f"{artifact_id}:{index}"
+                    active = st.session_state.get("ketcher_open")
+                    if st.button(
+                        "Close drawing editor" if active == drawing_key else "Edit drawing",
+                        key=f"ketcher-toggle-{drawing_key}",
+                    ):
+                        st.session_state["ketcher_open"] = (
+                            None if active == drawing_key else drawing_key
+                        )
+                        st.rerun()
+                    if st.session_state.get("ketcher_open") == drawing_key:
+                        if _ketcher is None:
+                            st.warning("The drawing editor is temporarily unavailable.")
+                        else:
+                            current_smiles = st.session_state.get(edit_key, rec.get("smiles", ""))
+                            drawing = _ketcher(
+                                molfile=initial_molfile(current_smiles),
+                                smiles=current_smiles,
+                                label=label,
+                                molecule_key=drawing_key,
+                                key=f"ketcher-component-{drawing_key}",
+                                default=None,
+                            )
+                            if isinstance(drawing, dict) and drawing.get("action") == "apply":
+                                try:
+                                    corrected, molblock = validated_ketcher_result(
+                                        drawing, drawing_key
+                                    )
+                                    st.session_state[edit_key] = corrected
+                                    st.session_state[f"ketcher-mol-{drawing_key}"] = {
+                                        "smiles": corrected,
+                                        "molfile": molblock,
+                                    }
+                                    st.session_state["ketcher_open"] = None
+                                    st.rerun()
+                                except ValueError as exc:
+                                    st.warning(f"Please check the drawing: {exc}")
                     a, b, c = st.columns([1, 2, 1])
                     with a:
                         if img:
@@ -257,7 +300,7 @@ if artifact_id:
                         value = st.text_area(
                             "SMILES",
                             value=rec.get("smiles", ""),
-                            key=f"edit-{artifact_id}-{index}",
+                            key=edit_key,
                         )
                         state[str(index)] = value
                         qa_status, canonical, inchikey, mol = assess(value)
@@ -308,7 +351,21 @@ if artifact_id:
                 })
                 st.download_button(
                     "Download reviewed results",
-                    make_review_zip(reviewed, images),
+                    make_review_zip(
+                        reviewed, images,
+                        molfiles={
+                            str(i): result_molfile(
+                                row.get("reviewed_smiles", ""),
+                                (
+                                    st.session_state.get(f"ketcher-mol-{artifact_id}:{i}", {}).get("molfile", "")
+                                    if st.session_state.get(f"ketcher-mol-{artifact_id}:{i}", {}).get("smiles")
+                                    == row.get("reviewed_smiles") else ""
+                                ),
+                            )
+                            for i, row in enumerate(reviewed)
+                            if row.get("qa_status") == "VALID_SYNTAX"
+                        },
+                    ),
                     f"panChem_reviewed_{run_id}.zip",
                     mime="application/zip", key=f"reviewed-{artifact_id}",
                 )
