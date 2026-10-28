@@ -99,6 +99,9 @@ jobs:
           PDF_PATH: ${{ inputs.pdf_path }}
           PDF_URL: ${{ inputs.pdf_url }}
           PDF_PAGES: ${{ inputs.pages }}
+          # Set repository variable PANCHEM_PARALLEL_MODEL_PRELOAD=0 to disable
+          # overlapped recognition-model loading without changing source code.
+          PANCHEM_PARALLEL_MODEL_PRELOAD: ${{ vars.PANCHEM_PARALLEL_MODEL_PRELOAD || '1' }}
           TF_CPP_MIN_LOG_LEVEL: "2"
           CUDA_VISIBLE_DEVICES: "-1"
         run: |
