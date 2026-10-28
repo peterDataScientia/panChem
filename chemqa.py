@@ -215,7 +215,7 @@ def make_review_zip(rows, images, molfiles=None):
                 block = Chem.MolToMolBlock(molecule)
             label = f"page{row.get('page')}_structure{row.get('structure')}"
             z.writestr(f"molecules/{label}.mol", block)
-            record = block.rstrip() + "\\n> <SMILES>\\n" + smiles + "\\n\\n$$\\n"
+            record = block.rstrip() + "\n> <SMILES>\n" + smiles + "\n\n$$$$\n"
             z.writestr(f"molecules/{label}.sdf", record)
             combined_sdf.append(record)
         if combined_sdf:
