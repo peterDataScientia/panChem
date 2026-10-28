@@ -133,19 +133,53 @@ if uploaded:
     except Exception as e:
         st.error(f"Invalid PDF: {e}")
         st.stop()
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        selected = st.text_input("2. Pages to extract", value="1", help="Examples: 1,3,5-8")
-    with col2:
-        viewed = st.number_input("Preview page", min_value=1, max_value=count, value=1)
-    st.image(preview(data, viewed), caption=f"Page {viewed} / {count}", width=580)
+    st.subheader("2. Browse PDF pages")
+    pdf_hash = hashlib.sha256(data).hexdigest()
+    if st.session_state.get("preview_pdf_hash") != pdf_hash:
+        st.session_state["preview_pdf_hash"] = pdf_hash
+        st.session_state["pdf_preview_page"] = 1
+
+    def move_preview(delta):
+        current = st.session_state.get("pdf_preview_page", 1)
+        st.session_state["pdf_preview_page"] = max(1, min(count, current + delta))
+
+    previous_col, slider_col, next_col = st.columns([1, 6, 1], vertical_alignment="bottom")
+    with previous_col:
+        st.button(
+            "◀ Previous", key="preview_previous", use_container_width=True,
+            disabled=st.session_state["pdf_preview_page"] <= 1,
+            on_click=move_preview, args=(-1,),
+        )
+    with slider_col:
+        if count > 1:
+            viewed = st.slider(
+                "Slide through all PDF pages", min_value=1, max_value=count,
+                step=1, key="pdf_preview_page",
+                help="Drag the slider to preview any page of this PDF.",
+            )
+        else:
+            viewed = 1
+            st.caption("Single-page PDF")
+    with next_col:
+        st.button(
+            "Next ▶", key="preview_next", use_container_width=True,
+            disabled=st.session_state["pdf_preview_page"] >= count,
+            on_click=move_preview, args=(1,),
+        )
+    st.caption(f"Previewing page {viewed} of {count}. All pages are available on the slider.")
+    st.image(preview(data, viewed), caption=f"PDF page {viewed} / {count}", width=580)
+
+    selected = st.text_input(
+        "3. Pages to extract", value="1",
+        help="Examples: 1,3,5-8. Sliding the preview does not change extraction selection.",
+    )
     try:
         pages = pages_list(selected, count)
         st.caption(f"{len(pages)} pages selected: {', '.join(map(str,pages))}")
     except ValueError as e:
         st.error(str(e))
         pages = []
-    if st.button("3. Extract all structures with GitHub Actions", type="primary", disabled=not token or not pages):
+    if st.button("4. Extract all structures with GitHub Actions", type="primary", disabled=not token or not pages):
         job_id = uuid.uuid4().hex[:12]
         pdf_path = f"jobs/{job_id}/paper.pdf"
         page_spec = ",".join(map(str, pages))
