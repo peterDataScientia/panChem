@@ -30,4 +30,4 @@ jobs:
       - name: Check Python syntax
         run: python -m compileall -q app.py chemqa.py tests/smoke_2d.py
       - name: Verify native and fallback molecular 2D drawing
-        run: python tests/smoke_2d.py
+        run: PYTHONPATH=. python tests/smoke_2d.py
