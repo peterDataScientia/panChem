@@ -23,6 +23,10 @@ class PerformanceRecorder:
         self.model_import_seconds = None
         self.pdf_fetch_seconds = None
         self.pages = []
+        self.prediction_timings = []
+        self.recognition_preload_enabled = False
+        self.recognition_preload_seconds = None
+        self.recognition_preload_wait_seconds = None
 
     def now(self):
         return perf_counter()
@@ -30,8 +34,17 @@ class PerformanceRecorder:
     def elapsed(self, from_time=None):
         return _round_seconds(self.now() - (self.started if from_time is None else from_time))
 
+    def add_recognition(self, page, index, seconds, cached=False):
+        """Record model inference duration without storing structures or SMILES."""
+        self.prediction_timings.append({
+            "page": int(page),
+            "structure": int(index),
+            "seconds": _round_seconds(seconds),
+            "cache_hit": bool(cached),
+        })
+
     def add_page(self, page, render_seconds, segmentation_seconds,
-                 recognition_seconds, structures, valid_smiles):
+                 recognition_seconds, structures, valid_smiles, cache_hits=0):
         record = {
             "page": int(page),
             "render_seconds": _round_seconds(render_seconds),
@@ -39,13 +52,15 @@ class PerformanceRecorder:
             "recognition_seconds": _round_seconds(recognition_seconds),
             "structures": int(structures),
             "valid_smiles": int(valid_smiles),
+            "cache_hits": int(cache_hits),
         }
         self.pages.append(record)
         print(
             "[PERF] page={page} render={render_seconds:.3f}s "
             "segmentation={segmentation_seconds:.3f}s "
             "recognition={recognition_seconds:.3f}s "
-            "structures={structures} valid_smiles={valid_smiles}".format(**record),
+            "structures={structures} valid_smiles={valid_smiles} "
+            "cache_hits={cache_hits}".format(**record),
             flush=True,
         )
 
@@ -58,7 +73,12 @@ class PerformanceRecorder:
             "total_worker_seconds": self.elapsed(),
             "model_import_seconds": self.model_import_seconds,
             "pdf_fetch_seconds": self.pdf_fetch_seconds,
+            "recognition_preload_enabled": self.recognition_preload_enabled,
+            "recognition_preload_seconds": self.recognition_preload_seconds,
+            "recognition_preload_wait_seconds": self.recognition_preload_wait_seconds,
             "pages": self.pages,
+            "prediction_timings": self.prediction_timings,
+            "recognition_cache_hits": sum(page["cache_hits"] for page in self.pages),
             "total_structures": sum(page["structures"] for page in self.pages),
             "valid_smiles": sum(page["valid_smiles"] for page in self.pages),
         }
