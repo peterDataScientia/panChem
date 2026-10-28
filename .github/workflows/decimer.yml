@@ -48,7 +48,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.data
-          key: panchem-decimer-models-v1
+          # New immutable cache is created after recognition finishes.
+          key: panchem-decimer-models-v2-tf215-decimer281
+          restore-keys: |
+            panchem-decimer-models-v1
       - name: Download DECIMER models with retries
         id: model_weights
         env:
@@ -85,12 +88,6 @@ jobs:
                       if attempt == 6: raise
                       time.sleep(min(attempt * 10, 40))
           PY
-      - name: Save DECIMER model cache immediately
-        if: success() && steps.model_cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ~/.data
-          key: panchem-decimer-models-v1
       - name: Verify versions
         run: |
           python -c "import numpy, tensorflow, cv2; print('NumPy',numpy.__version__,'TF',tensorflow.__version__,'OpenCV',cv2.__version__)"
@@ -128,6 +125,15 @@ jobs:
           else
             python worker.py --url "$PDF_URL" --pages "$PDF_PAGES" --output results
           fi
+      - name: Save complete DECIMER model cache after inference
+        # Save both segmentation and recognition models. Cache errors must not
+        # invalidate otherwise successful extraction.
+        if: success() && steps.model_cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.data
+          key: panchem-decimer-models-v2-tf215-decimer281
       - uses: actions/upload-artifact@v4
         if: always()
         with:
