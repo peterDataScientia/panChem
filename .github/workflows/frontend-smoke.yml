@@ -11,6 +11,9 @@ on:
       - 'chemqa.py'
       - 'pdf_viewer.py'
       - 'progress_events.py'
+      - 'performance_diagnostics.py'
+      - 'worker.py'
+      - 'tests/smoke_performance.py'
       - 'components/live_progress/index.html'
       - 'tests/smoke_realtime.py'
       - 'tests/smoke_pdf_viewer.py'
@@ -37,7 +40,7 @@ jobs:
       - name: Install frontend dependencies
         run: python -m pip install -r requirements.txt
       - name: Check Python syntax
-        run: python -m compileall -q ketcher_review.py app.py time_utils.py chemqa.py pdf_viewer.py progress_events.py tests/smoke_2d.py tests/smoke_pdf_viewer.py tests/smoke_realtime.py tests/smoke_time_eat.py
+        run: python -m compileall -q ketcher_review.py app.py time_utils.py chemqa.py pdf_viewer.py progress_events.py tests/smoke_2d.py tests/smoke_pdf_viewer.py tests/smoke_realtime.py tests/smoke_time_eat.py performance_diagnostics.py worker.py tests/smoke_performance.py
       - name: Verify native and fallback molecular 2D drawing
         run: PYTHONPATH=. python tests/smoke_2d.py
       - name: Verify fullscreen PDF control HTML and JavaScript
@@ -48,3 +51,5 @@ jobs:
         run: PYTHONPATH=. python tests/smoke_realtime.py
       - name: Verify East Africa Time labels
         run: PYTHONPATH=. python tests/smoke_time_eat.py
+      - name: Verify DECIMER worker timing and GitHub diagnostics
+        run: PYTHONPATH=. python tests/smoke_performance.py
