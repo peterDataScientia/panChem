@@ -96,9 +96,11 @@ recognition_calls = []
 preload_calls = []
 
 def fake_predict(image):
-    assert isinstance(image, np.ndarray), "Must pass pixels directly, not a PNG filename"
-    assert image.dtype == np.uint8 and image.shape == (8, 8, 3)
-    recognition_calls.append(image.copy())
+    assert isinstance(image, str), "Original DECIMER API uses an image path"
+    assert Path(image).is_file()
+    with Image.open(image) as source:
+        assert np.asarray(source.convert("RGB")).shape == (8, 8, 3)
+    recognition_calls.append(image)
     return "CCO"
 
 def fake_preload(printed=True, hand_drawn=False):
@@ -123,16 +125,16 @@ with tempfile.TemporaryDirectory() as tmp:
     assert result["total_structures"] == 2
     assert result["valid_smiles"] == 2
     assert not result["recognition_preload_enabled"]
-    assert result["recognition_cache_hits"] == 1
+    assert result["recognition_cache_hits"] == 0
     assert len(preload_calls) == 0
-    assert len(recognition_calls) == 1, "Duplicate image should not be inferred twice"
+    assert len(recognition_calls) == 2, "Each structure should be recognized"
     assert len(result["pages"]) == 1
     assert result["prediction_timings"][0]["cache_hit"] is False
-    assert result["prediction_timings"][1]["cache_hit"] is True
+    assert result["prediction_timings"][1]["cache_hit"] is False
     assert Path(output, "results.csv").is_file()
     assert Path(output, "results.smi").read_text().startswith("CCO ")
-    with Image.open(output / "page_1_structure_1.png") as saved:
-        np.testing.assert_array_equal(recognition_calls[0], np.asarray(saved.convert("RGB")))
+    assert recognition_calls[0].endswith("page_1_structure_1.png")
+    assert recognition_calls[1].endswith("page_1_structure_2.png")
     with (output / "results.csv").open(encoding="utf-8") as stream:
         result_lines = stream.read().splitlines()
     assert len(result_lines) == 3, "Both identical depictions retain separate CSV rows"
@@ -155,10 +157,10 @@ with tempfile.TemporaryDirectory() as tmp:
             runpy.run_path(str(worker_script), run_name="__main__")
         local_result = json.loads(Path(local_output, "performance.json").read_text())
         assert local_result["total_structures"] == 2
-        assert local_result["recognition_cache_hits"] == 1
-        assert local_result["recognition_preload_enabled"]
-        assert len(recognition_calls) == 2, "Cache must reset for each PDF job"
-        assert len(preload_calls) == 1, "Explicit opt-in should preload recognition once"
+        assert local_result["recognition_cache_hits"] == 0
+        assert not local_result["recognition_preload_enabled"]
+        assert len(recognition_calls) == 4, "Both input paths must recognize each structure"
+        assert len(preload_calls) == 0, "No parallel preload after rollback"
         assert Path(local_output, "results.csv").is_file()
         assert Path(local_output, "page_1_structure_1.png").is_file()
         assert Path(local_output, "page_1_structure_2.png").is_file()
@@ -169,6 +171,6 @@ workflow = Path(".github/workflows/decimer.yml").read_text()
 assert "results/performance.json" in workflow
 assert workflow.index("name: Save complete DECIMER model cache after inference") > workflow.index("name: Extract selected pages")
 assert "panchem-decimer-models-v2-tf215-decimer281" in workflow
-assert "PANCHEM_PARALLEL_MODEL_PRELOAD:" in workflow
+assert "PANCHEM_PARALLEL_MODEL_PRELOAD:" not in workflow
 assert "performance_diagnostics_panel()" in Path("app.py").read_text()
-print("Serial-default inference, optional preload, caching and timings: PASSED")
+print("Restored DECIMER image-path inference, artifacts and timings: PASSED")
