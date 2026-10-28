@@ -1,2 +1,6 @@
 libgl1
 libglib2.0-0
+libcairo2
+libxrender1
+libxext6
+libsm6
