@@ -38,7 +38,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          ref: ${{ github.sha }}
+          fetch-depth: 1
       - name: Restore DECIMER model cache
         id: model_cache
         uses: actions/cache/restore@v4
@@ -81,6 +82,12 @@ jobs:
                       if attempt == 6: raise
                       time.sleep(min(attempt * 10, 40))
           PY
+      - name: Save DECIMER model cache immediately
+        if: success() && steps.decimer-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.data
+          key: panchem-decimer-models-v2
       - name: Verify versions
         run: |
           python -c "import numpy, tensorflow, cv2; print('NumPy',numpy.__version__,'TF',tensorflow.__version__,'OpenCV',cv2.__version__)"
