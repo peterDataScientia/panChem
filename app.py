@@ -10,8 +10,10 @@ from urllib.parse import urlparse
 import pypdfium2 as pdfium
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 from PIL import Image
 from chemqa import assess, molecule_svg, rows_from_artifact, make_review_zip
+from pdf_viewer import full_page_viewer
 
 REPO = "peterDataScientia/panChem"
 API = f"https://api.github.com/repos/{REPO}"
@@ -167,7 +169,20 @@ if uploaded:
             on_click=move_preview, args=(1,),
         )
     st.caption(f"Previewing page {viewed} of {count}. All pages are available on the slider.")
-    st.image(preview(data, viewed), caption=f"PDF page {viewed} / {count}", width=580)
+    fullscreen_preview = st.toggle(
+        "Interactive full-page PDF viewer (zoom, page slider, swipe, fullscreen)",
+        value=False, key="interactive_pdf_viewer",
+        help="Controls remain available inside the full-page viewer and fullscreen mode.",
+    )
+    if fullscreen_preview:
+        components.html(full_page_viewer(data, initial_page=viewed), height=720, scrolling=False)
+        st.caption(
+            "Use controls inside the PDF viewer: previous/next, page number, slider, zoom, "
+            "fit width/page and fullscreen. On mobile, swipe sideways to change pages. "
+            "Browser fullscreen availability depends on device and iframe permissions."
+        )
+    else:
+        st.image(preview(data, viewed), caption=f"PDF page {viewed} / {count}", width=580)
 
     selected = st.text_input(
         "3. Pages to extract", value="1",
