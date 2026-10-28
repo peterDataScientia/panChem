@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 
@@ -11,13 +12,13 @@ export default defineConfig({
     enforce: 'pre',
     transform(code, id) {
       if (!id.replaceAll('\\', '/').includes('ketcher-core/dist/application/ketcher.modern.js')) return;
-      const expression = /require\\(["']raphael["']\\)/g;
+      const expression = /require\(["']raphael["']\)/g;
       if (!expression.test(code)) return;
       return {
-        code: "import Raphael from 'raphael';\\n" + code.replace(expression, 'Raphael'),
-        map: null,
+        code: "import Raphael from 'raphael';\n" + code.replace(expression, 'Raphael'),
+        map: null
       };
-    },
+    }
   }],
   base: './',
   resolve: {
@@ -37,6 +38,5 @@ export default defineConfig({
     chunkSizeWarningLimit: 14000,
     sourcemap: false
   },
-  // Standalone Indigo WASM runs in the browser, without a remote Indigo backend.
   optimizeDeps: { exclude: ['ketcher-standalone'] }
 });
