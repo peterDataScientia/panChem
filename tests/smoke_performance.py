@@ -30,9 +30,10 @@ with tempfile.TemporaryDirectory() as tmp:
     assert report["valid_smiles"] == 1
     assert report["pages"][0]["segmentation_seconds"] == 1.6
     data = Path(tmp, "performance.json").read_bytes()
-    with zipfile.ZipFile(io.BytesIO(), "w") as output:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as output:
         output.writestr("results/performance.json", data)
-        artifact = output.fp.getvalue()
+    artifact = buffer.getvalue()
     recovered = performance_from_artifact(artifact)
     assert recovered["model_import_seconds"] == 0.125
 
