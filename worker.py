@@ -12,6 +12,7 @@ import pypdfium2 as pdfium
 from PIL import Image
 from rdkit import Chem
 from progress_events import publish
+from performance_diagnostics import PerformanceRecorder
 
 def parse_pages(raw, count):
     if raw.strip().lower() == 'all':
@@ -45,26 +46,38 @@ def fetch_pdf(url, destination):
         if stream.read(5)!=b"%PDF-": raise ValueError("Not a PDF")
 
 def run(url,pages,outdir):
+    perf = PerformanceRecorder()
+    import_started = perf.now()
     from decimer_segmentation import segment_chemical_structures_from_file
     from DECIMER import predict_SMILES
+    perf.model_import_seconds = perf.elapsed(import_started)
 
     outdir.mkdir(parents=True,exist_ok=True)
     pdf_path=outdir/"input.pdf"
+    download_started = perf.now()
     fetch_pdf(url,pdf_path)
+    perf.pdf_fetch_seconds = perf.elapsed(download_started)
     pdf=pdfium.PdfDocument(str(pdf_path))
     selected=parse_pages(pages,len(pdf))
     rows=[]
     publish("extracting", total_pages=len(selected), completed_pages=0, structures=0)
     for completed_pages, page in enumerate(selected, 1):
         print(f"Processing page {page}",flush=True)
+        render_started = perf.now()
         pil=pdf[page-1].render(scale=300/72).to_pil().convert("RGB")
         page_image=outdir/f"page_{page}.png"
         pil.save(page_image)
+        render_seconds = perf.elapsed(render_started)
+        segment_started = perf.now()
         segments,boxes=segment_chemical_structures_from_file(str(page_image),expand=True,return_bboxes=True)
+        segmentation_seconds = perf.elapsed(segment_started)
         page_image.unlink(missing_ok=True)
+        recognition_seconds = 0.0
+        valid_smiles = 0
         for index,(segment,box) in enumerate(zip(segments,boxes),1):
             image_path=outdir/f"page_{page}_structure_{index}.png"
             Image.fromarray(segment).convert("RGB").save(image_path)
+            recognition_started = perf.now()
             try:
                 smiles=str(predict_SMILES(str(image_path)))
                 mol=Chem.MolFromSmiles(smiles)
@@ -73,9 +86,13 @@ def run(url,pages,outdir):
             except Exception as exc:
                 smiles=canonical=""
                 error=f"{type(exc).__name__}: {exc}"
+            recognition_seconds += perf.elapsed(recognition_started)
+            valid_smiles += bool(canonical)
             rows.append(dict(page=page,structure=index,bbox=str(tuple(map(int,box))),
                              smiles=smiles,canonical_smiles=canonical,error=error,
                              image=image_path.name))
+        perf.add_page(page, render_seconds, segmentation_seconds,
+                      recognition_seconds, len(segments), valid_smiles)
         print(f"Page {page}: {len(segments)} structures",flush=True)
         publish("page_complete", page=page, total_pages=len(selected),
                 completed_pages=completed_pages, page_structures=len(segments), structures=len(rows))
@@ -85,6 +102,7 @@ def run(url,pages,outdir):
         w=csv.DictWriter(f,fieldnames=["page","structure","bbox","smiles","canonical_smiles","error","image"])
         w.writeheader();w.writerows(rows)
     (outdir/"results.smi").write_text("\n".join(f"{r['canonical_smiles']} page{r['page']}_{r['structure']}" for r in rows if r["canonical_smiles"]),encoding="utf-8")
+    perf.save(outdir)
     print(f"Completed. Structures: {len(rows)}",flush=True)
 
 if __name__=="__main__":
@@ -100,22 +118,32 @@ if __name__=="__main__":
         if not source.is_relative_to(base / "jobs") or not source.is_file() or source.suffix.lower() != ".pdf":
             raise ValueError("Input PDF must be inside jobs/ directory")
         def local_run(path, pages, outdir):
+            perf = PerformanceRecorder()
+            import_started = perf.now()
             from decimer_segmentation import segment_chemical_structures_from_file
             from DECIMER import predict_SMILES
+            perf.model_import_seconds = perf.elapsed(import_started)
             outdir.mkdir(parents=True, exist_ok=True)
             pdf = pdfium.PdfDocument(str(path))
             selected = parse_pages(pages, len(pdf))
             rows = []
             publish("extracting", total_pages=len(selected), completed_pages=0, structures=0)
             for completed_pages, page in enumerate(selected, 1):
+                render_started = perf.now()
                 pil = pdf[page-1].render(scale=300/72).to_pil().convert("RGB")
                 page_img = outdir / f"page_{page}.png"
                 pil.save(page_img)
+                render_seconds = perf.elapsed(render_started)
+                segment_started = perf.now()
                 segments, boxes = segment_chemical_structures_from_file(str(page_img), expand=True, return_bboxes=True)
+                segmentation_seconds = perf.elapsed(segment_started)
                 page_img.unlink(missing_ok=True)
+                recognition_seconds = 0.0
+                valid_smiles = 0
                 for idx, (seg, box) in enumerate(zip(segments,boxes),1):
                     image = outdir / f"page_{page}_structure_{idx}.png"
                     Image.fromarray(seg).convert("RGB").save(image)
+                    recognition_started = perf.now()
                     try:
                         smiles = str(predict_SMILES(str(image)))
                         mol = Chem.MolFromSmiles(smiles)
@@ -124,8 +152,12 @@ if __name__=="__main__":
                     except Exception as exc:
                         smiles = canonical = ""
                         err = f"{type(exc).__name__}: {exc}"
+                    recognition_seconds += perf.elapsed(recognition_started)
+                    valid_smiles += bool(canonical)
                     rows.append(dict(page=page, structure=idx, bbox=str(tuple(map(int,box))),
                                      smiles=smiles, canonical_smiles=canonical, error=err, image=image.name))
+                perf.add_page(page, render_seconds, segmentation_seconds,
+                              recognition_seconds, len(segments), valid_smiles)
                 print(f"Page {page}: {len(segments)} detected structures", flush=True)
                 publish("page_complete", page=page, total_pages=len(selected),
                         completed_pages=completed_pages, page_structures=len(segments), structures=len(rows))
@@ -135,6 +167,7 @@ if __name__=="__main__":
                 writer.writeheader()
                 writer.writerows(rows)
             (outdir/"results.smi").write_text("\n".join(f"{r['canonical_smiles']} page{r['page']}_{r['structure']}" for r in rows if r["canonical_smiles"]),encoding="utf-8")
+            perf.save(outdir)
             print(f"Completed {len(rows)} structures",flush=True)
         local_run(source,a.pages,Path(a.output))
     elif a.url:
