@@ -1,0 +1,46 @@
+name: Build Ketcher drawing editor
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'components/ketcher/frontend/**'
+      - '.github/workflows/build-ketcher.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: components/ketcher/frontend/package-lock.json
+      - name: Install Ketcher and frontend dependencies
+        working-directory: components/ketcher/frontend
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+      - name: Copy licensed editor resources
+        working-directory: components/ketcher/frontend
+        run: node scripts/copy-assets.mjs
+      - name: Build browser-based drawing editor
+        working-directory: components/ketcher/frontend
+        run: npm run build
+      - name: Validate standalone component output
+        run: |
+          test -s components/ketcher/dist/index.html
+          test -n "$(find components/ketcher/dist/assets -name '*.js' -print -quit)"
+          du -sh components/ketcher/dist
+      - name: Commit built editor to Streamlit source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f components/ketcher/dist
+          if ! git diff --cached --quiet; then
+            git commit -m "Publish compiled Ketcher editor for Streamlit [skip ci]"
+            git push origin HEAD:main
+          fi
