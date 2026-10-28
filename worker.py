@@ -5,7 +5,8 @@ Optimizations:
 - Overlap loading the printed recognition model with first-page segmentation.
 - Pass identical RGB pixels as NumPy arrays to DECIMER (avoid PNG re-reading).
 - Reuse inference for pixel-identical depictions within one PDF job.
-Set PANCHEM_PARALLEL_MODEL_PRELOAD=0 to disable background model loading.
+Parallel model preloading is OFF by default on CPU-only runners. Set
+PANCHEM_PARALLEL_MODEL_PRELOAD=1 only for controlled benchmarks.
 """
 import argparse
 from concurrent.futures import ThreadPoolExecutor
@@ -100,8 +101,10 @@ def process_document(pdf_path, pages, outdir, perf):
     selected = parse_pages(pages, len(doc))
     rows = []
     prediction_cache = {}
-    parallel_preload = os.environ.get("PANCHEM_PARALLEL_MODEL_PRELOAD", "1").lower() not in (
-        "0", "false", "off", "no"
+    # Loading DECIMER and Mask R-CNN concurrently can contend for CPU/RAM.
+    # Serial lazy loading is the default; opt in only for A/B tests.
+    parallel_preload = os.environ.get("PANCHEM_PARALLEL_MODEL_PRELOAD", "0").strip().lower() in (
+        "1", "true", "on", "yes"
     )
     perf.recognition_preload_enabled = parallel_preload
     executor = None
