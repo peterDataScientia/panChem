@@ -3,8 +3,6 @@ import csv
 import hashlib
 import io
 from pathlib import Path
-from datetime import datetime
-from zoneinfo import ZoneInfo
 import time
 import uuid
 import zipfile
@@ -17,6 +15,7 @@ import streamlit.components.v1 as components
 from PIL import Image
 from chemqa import assess, molecule_svg, rows_from_artifact, make_review_zip
 from pdf_viewer import full_page_viewer
+from time_utils import format_eat
 
 _live_events = components.declare_component(
     "panchem_live_events", path=str(Path(__file__).parent / "components" / "live_progress")
@@ -25,22 +24,6 @@ _live_events = components.declare_component(
 REPO = "peterDataScientia/panChem"
 API = f"https://api.github.com/repos/{REPO}"
 WORKFLOW = "decimer.yml"
-EAST_AFRICA = ZoneInfo("Africa/Dar_es_Salaam")
-
-
-def format_eat(value):
-    """Display GitHub's UTC/offset-aware timestamps in East Africa Time."""
-    if not value:
-        return "Time unavailable"
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        if parsed.tzinfo is None:
-            raise ValueError("Timestamp has no timezone")
-        return parsed.astimezone(EAST_AFRICA).strftime("%d %b %Y · %H:%M EAT")
-    except (TypeError, AttributeError, ValueError):
-        return "Time unavailable"
-
-
 st.set_page_config(page_title="panChem | DECIMER", page_icon="🧪", layout="wide")
 st.title("🧪 panChem")
 st.caption("Extract chemical structures from research PDFs.")
