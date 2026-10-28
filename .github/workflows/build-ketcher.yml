@@ -31,6 +31,14 @@ jobs:
       - name: Verify editor in Chrome browser
         working-directory: components/ketcher/frontend
         run: npm run test:browser
+      - name: Upload browser diagnostics if test fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ketcher-browser-diagnostics
+          path: components/ketcher/frontend/ketcher-browser-failure.png
+          if-no-files-found: ignore
+          retention-days: 3
       - name: Validate standalone component output
         run: |
           test -s components/ketcher/dist/index.html
