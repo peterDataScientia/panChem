@@ -19,7 +19,7 @@ def full_page_viewer(pdf_bytes: bytes, initial_page: int = 1) -> str:
 <style>
   *{box-sizing:border-box}
   html,body{margin:0;width:100%;height:100%;background:#f1f3f6;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#17212e}
-  #viewer{height:700px;width:100%;display:flex;flex-direction:column;background:#f4f6f9;border:1px solid #d6dbe3;border-radius:12px;overflow:hidden}
+  #viewer{height:100%;width:100%;display:flex;flex-direction:column;background:#f4f6f9;border:1px solid #d6dbe3;border-radius:12px;overflow:hidden}
   #viewer:fullscreen{height:100dvh;width:100vw;border:0;border-radius:0;background:#edf0f3}
   #toolbar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:9px 11px;background:#fff;border-bottom:1px solid #d8dee7;position:relative;z-index:2;flex-shrink:0}
   button{border:1px solid #c9d1dd;background:white;border-radius:7px;padding:9px 10px;color:#17212e;font-size:13px;cursor:pointer;touch-action:manipulation;min-height:38px;white-space:nowrap}
@@ -37,8 +37,10 @@ def full_page_viewer(pdf_bytes: bytes, initial_page: int = 1) -> str:
   #status{font-size:12px;padding:5px 11px;background:#fff;border-top:1px solid #d8dee7;color:#64748b;min-height:27px;flex-shrink:0}
   #status.error{color:#a11212}
   #viewer:fullscreen #toolbar{padding:9px 12px}
+  #viewer:fullscreen #range{max-width:320px}
+  #viewport canvas{touch-action:pan-x pan-y}
   @media(max-width:650px){
-    #viewer{height:650px}
+    #viewer{height:100%}
     #toolbar{gap:5px;padding:7px}
     button{padding:7px 9px;min-height:36px}
     #range{order:5;max-width:100%;flex-basis:100%}
@@ -75,7 +77,7 @@ def full_page_viewer(pdf_bytes: bytes, initial_page: int = 1) -> str:
   const $ = (id) => document.getElementById(id);
   const viewer = $("viewer"), viewport = $("viewport"), canvas = $("canvas");
   const status = $("status"), range = $("range"), pageInput = $("pageInput");
-  let pdf = null, pageNo = startPage, mode = "width", zoom = 1.0;
+  let pdf = null, pageNo = startPage, mode = "page", zoom = 1.0;
   let renderToken = 0, currentRender = null, queuedSlider = null, touchX=0, touchY=0;
   function say(message, error){
     status.textContent = message;
