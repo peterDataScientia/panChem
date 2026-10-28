@@ -40,11 +40,13 @@ jobs:
         with:
           fetch-depth: 2
       - name: Restore DECIMER model cache
-        uses: actions/cache@v4
+        id: model_cache
+        uses: actions/cache/restore@v4
         with:
           path: ~/.data
-          key: panchem-decimer-models-v1
+          key: panchem-decimer-models-v2
       - name: Download DECIMER models with retries
+        id: model_weights
         env:
           TF_CPP_MIN_LOG_LEVEL: "2"
           CUDA_VISIBLE_DEVICES: "-1"
@@ -111,6 +113,12 @@ jobs:
           else
             python worker.py --url "$PDF_URL" --pages "$PDF_PAGES" --output results
           fi
+      - name: Save DECIMER model cache
+        if: ${{ always() && steps.model_weights.outcome == 'success' && steps.model_cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.data
+          key: panchem-decimer-models-v2
       - uses: actions/upload-artifact@v4
         if: always()
         with:
