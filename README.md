@@ -1,30 +1,32 @@
-# panChem — automated PDF chemical-structure extraction
+# panChem
 
-**Frontend:** Streamlit Community Cloud. **Compute:** GitHub Actions Ubuntu runner. **Models:** Official DECIMER Image Segmentation and Image Transformer.
+Automated extraction and chemical review of molecular structures from research PDFs.
 
-## Use
-1. Deploy this repository on Streamlit Community Cloud; main entry point: `app.py`, Python 3.11.
-2. Create a fine-grained GitHub personal access token for **peterDataScientia/panChem** with **Contents: read and write** and **Actions: read and write**.
-3. In the Streamlit app dashboard choose **Settings → Secrets** and enter:
+## Architecture (for maintainers)
 
-```toml
-GITHUB_TOKEN = "paste_your_token_here"
-```
+- Streamlit Community Cloud is the frontend; use Python 3.11 and app.py.
+- GitHub Actions runs DECIMER inside a prebuilt GHCR worker image.
+- Uploaded PDFs are committed under jobs/<job-id>/paper.pdf; the GitHub push event triggers .github/workflows/decimer.yml.
+- Streamlit needs a fine-grained GITHUB_TOKEN secret with Contents read/write and Actions read. Actions write is not necessary for the push-triggered workflow.
+- The worker emits starting, extracting, per-page completion, results_ready and failure events using progress_events.py.
+- A Streamlit bidirectional component in components/live_progress/index.html subscribes to a persistent ntfy.sh Server-Sent Events feed. No interval-based GitHub polling is required for live progress.
+- When a results_ready event arrives, app.py verifies the associated GitHub run and loads the extraction artifact automatically.
+- The PDF viewer in pdf_viewer.py offers page navigation, zoom, fit options and browser fullscreen. chemqa.py handles SMILES QA and 2D SVG depictions.
 
-4. Reboot the app. Upload a PDF (max 25 MB), specify page numbers such as `1,3,5-7`, click **Extract all structures with GitHub Actions**.
-5. Open **Job status and downloads**, refresh, retrieve an artifact after completion, view the CSV and download images and SMILES.
+## Privacy and limitations
 
-## How the compute pipeline works
+**WARNING:** PDFs uploaded via this version are committed to a public GitHub repository and remain accessible until deleted. Upload only PDFs that may legally be published.
 
-- Streamlit uploads the PDF as `jobs/<job-id>/paper.pdf` using GitHub's Contents API.
-- Streamlit dispatches the `DECIMER PDF extraction` GitHub Actions workflow, passing the path and pages.
-- The GitHub runner installs `worker-requirements.txt`, loads the official DECIMER models, segments each selected page and predicts SMILES.
-- A downloadable GitHub artifact contains `results.csv`, `results.smi` and source structure PNG crops.
+Progress notifications go through the public external service ntfy.sh. The topic is based on a random job ID; the event payload includes job/run identifiers, stage names and numeric progress. No PDF bytes, SMILES, extracted structure images, usernames or filenames are sent to ntfy.sh. Do not transmit confidential progress information there.
 
-## Limitations and operational details
+The progress relay is best-effort. If unavailable, GitHub extraction can still complete; previous completed analyses can be opened from the app.
 
-- Uploaded PDFs are placed in a **public repository** in the current MVP and persist until deleted. Do not upload material you cannot publish.
-- This architecture does not need Tailscale, local compute or Streamlit Cloud ML dependencies.
-- Model downloads and model initialization are heavy; first runs may take time and exceed available runner resources.
-- The automated pipeline has not yet passed a verified complete GitHub-hosted inference smoke test.
-- DECIMER cannot be assumed correct for all stereochemistry, abbreviations or Markush tables. Validate figures before using the results in research.
+DECIMER recognition and Markush structures must be verified against original source figures. SMILES syntactic validity does not guarantee chemical fidelity.
+
+## CI checks
+
+- .github/workflows/frontend-smoke.yml: Python syntax, 2D drawings, interactive PDF viewer, SSE component.
+- .github/workflows/build-worker.yml: builds and publishes the preinstalled DECIMER Docker image.
+- .github/workflows/decimer.yml: actual chemical extraction and artifact output.
+
+**Developer-only diagnostics belong in GitHub workflows and logs, not on the public-facing Streamlit screen.**
