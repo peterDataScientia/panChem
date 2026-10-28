@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "test": "node --check src/bridge.js"
+    "test": "node --check src/bridge.js",
+    "test:browser": "node tests/browser.mjs"
   },
   "dependencies": {
     "ketcher-core": "3.18.0",
@@ -16,6 +17,7 @@
     "events": "3.3.0"
   },
   "devDependencies": {
-    "vite": "6.3.5"
+    "vite": "6.3.5",
+    "playwright-core": "1.55.0"
   }
 }
