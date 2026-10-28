@@ -11,6 +11,7 @@ import requests
 import pypdfium2 as pdfium
 from PIL import Image
 from rdkit import Chem
+from progress_events import publish
 
 def parse_pages(raw, count):
     if raw.strip().lower() == 'all':
@@ -53,7 +54,8 @@ def run(url,pages,outdir):
     pdf=pdfium.PdfDocument(str(pdf_path))
     selected=parse_pages(pages,len(pdf))
     rows=[]
-    for page in selected:
+    publish("extracting", total_pages=len(selected), completed_pages=0, structures=0)
+    for completed_pages, page in enumerate(selected, 1):
         print(f"Processing page {page}",flush=True)
         pil=pdf[page-1].render(scale=300/72).to_pil().convert("RGB")
         page_image=outdir/f"page_{page}.png"
@@ -75,6 +77,8 @@ def run(url,pages,outdir):
                              smiles=smiles,canonical_smiles=canonical,error=error,
                              image=image_path.name))
         print(f"Page {page}: {len(segments)} structures",flush=True)
+        publish("page_complete", page=page, total_pages=len(selected),
+                completed_pages=completed_pages, page_structures=len(segments), structures=len(rows))
     pdf.close()
     pdf_path.unlink(missing_ok=True)
     with (outdir/"results.csv").open("w",newline="",encoding="utf-8") as f:
@@ -102,7 +106,8 @@ if __name__=="__main__":
             pdf = pdfium.PdfDocument(str(path))
             selected = parse_pages(pages, len(pdf))
             rows = []
-            for page in selected:
+            publish("extracting", total_pages=len(selected), completed_pages=0, structures=0)
+            for completed_pages, page in enumerate(selected, 1):
                 pil = pdf[page-1].render(scale=300/72).to_pil().convert("RGB")
                 page_img = outdir / f"page_{page}.png"
                 pil.save(page_img)
@@ -122,6 +127,8 @@ if __name__=="__main__":
                     rows.append(dict(page=page, structure=idx, bbox=str(tuple(map(int,box))),
                                      smiles=smiles, canonical_smiles=canonical, error=err, image=image.name))
                 print(f"Page {page}: {len(segments)} detected structures", flush=True)
+                publish("page_complete", page=page, total_pages=len(selected),
+                        completed_pages=completed_pages, page_structures=len(segments), structures=len(rows))
             pdf.close()
             with (outdir/"results.csv").open("w", newline="",encoding="utf-8") as output:
                 writer=csv.DictWriter(output,fieldnames=["page","structure","bbox","smiles","canonical_smiles","error","image"])
