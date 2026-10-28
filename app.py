@@ -2,6 +2,7 @@ import base64
 import csv
 import hashlib
 import io
+import json
 from pathlib import Path
 import time
 import uuid
@@ -16,6 +17,7 @@ from PIL import Image
 from chemqa import assess, molecule_svg, rows_from_artifact, make_review_zip
 from pdf_viewer import full_page_viewer
 from time_utils import format_eat
+from performance_diagnostics import performance_from_artifact, github_timing_report
 from ketcher_review import validated_ketcher_result, initial_molfile, result_molfile
 
 _live_events = components.declare_component(
@@ -428,6 +430,149 @@ def recent_jobs():
             logging.exception("History retrieval failed")
             st.warning("Previous analyses could not be loaded.")
 
+@st.fragment
+def performance_diagnostics_panel():
+    """On-demand timing inspection; separate from the user-facing live progress."""
+    with st.expander("Performance diagnostics", expanded=False):
+        current_artifact = st.session_state.get("active_artifact_id")
+        current_run = st.session_state.get("active_run_id")
+        blob = st.session_state.get(f"artifact-{current_artifact}") if current_artifact else None
+        worker_perf = None
+        if blob:
+            try:
+                worker_perf = performance_from_artifact(blob)
+            except ValueError:
+                st.caption("Timing file could not be read from this archive.")
+            if worker_perf:
+                st.caption("Worker measurements from the downloaded extraction artifact.")
+                col_a, col_b, col_c = st.columns(3)
+                col_a.metric("Worker total", f"{worker_perf.get('total_worker_seconds', 0):.1f} s")
+                col_b.metric("Structures", int(worker_perf.get("total_structures", 0)))
+                col_c.metric("Valid SMILES", int(worker_perf.get("valid_smiles", 0)))
+                if worker_perf.get("model_import_seconds") is not None:
+                    st.caption(
+                        f"Model module import: {worker_perf['model_import_seconds']:.2f} s. "
+                        "First inference may also load model weights."
+                    )
+                if worker_perf.get("pdf_fetch_seconds") is not None:
+                    st.caption(f"PDF download: {worker_perf['pdf_fetch_seconds']:.2f} s")
+                page_records = worker_perf.get("pages", [])
+                if page_records:
+                    st.dataframe(page_records, hide_index=True, use_container_width=True)
+                st.caption(
+                    "Render, segmentation and recognition are measured separately. "
+                    "Worker total also includes initialization and result-writing overhead."
+                )
+            else:
+                st.caption("This extraction predates per-page timing instrumentation.")
+        else:
+            st.caption("Select an extraction to see per-page measurements.")
+
+        if not token:
+            return
+        targets = ["Extraction workflow", "Worker image builds"]
+        target = st.selectbox("GitHub Actions timings", targets, key="perf-diagnostic-target")
+        if st.button("Load / refresh timings", key="perf-load-github"):
+            try:
+                if target == "Extraction workflow":
+                    if not current_run:
+                        st.info("Open an extraction result first.")
+                    else:
+                        run = api_request(
+                            "GET", f"{API}/actions/runs/{int(current_run)}", token
+                        ).json()
+                        jobs = api_request(
+                            "GET", f"{API}/actions/runs/{int(current_run)}/jobs", token,
+                            params={"per_page": 100},
+                        ).json().get("jobs", [])
+                        report = github_timing_report(run, jobs)
+                        st.session_state["perf-github-report"] = {
+                            "target": target, "run": int(current_run), "reports": [report]
+                        }
+                else:
+                    runs = api_request(
+                        "GET", f"{API}/actions/workflows/build-worker.yml/runs", token,
+                        params={"per_page": 10},
+                    ).json().get("workflow_runs", [])
+                    selected = [r for r in runs if r.get("status") == "completed"][:2]
+                    reports = []
+                    for run in selected:
+                        jobs = api_request(
+                            "GET", f"{API}/actions/runs/{int(run['id'])}/jobs", token,
+                            params={"per_page": 100},
+                        ).json().get("jobs", [])
+                        reports.append(github_timing_report(run, jobs))
+                    st.session_state["perf-github-report"] = {
+                        "target": target, "run": None, "reports": reports
+                    }
+                    if not reports:
+                        st.info("No completed worker builds were found.")
+            except Exception:
+                import logging
+                logging.exception("Performance timing retrieval failed")
+                st.warning("GitHub timing details could not be loaded.")
+
+        saved = st.session_state.get("perf-github-report")
+        if saved and saved.get("target") == target and (
+            target == "Worker image builds" or saved.get("run") == current_run
+        ):
+            reports = saved.get("reports", [])
+            if target == "Worker image builds" and reports:
+                st.dataframe([
+                    {
+                        "Run ID": item["run_id"],
+                        "Status": item["workflow_status"],
+                        "Conclusion": item["workflow_conclusion"],
+                        "Queue (s)": item["queue_seconds"],
+                        "Job (s)": item["job_seconds"],
+                    }
+                    for item in reports
+                ], hide_index=True, use_container_width=True)
+            for item in reports[:1]:
+                if item.get("verified_success"):
+                    st.caption(f"Run {item['run_id']}: completed / success (workflow and job).")
+                else:
+                    st.caption(
+                        f"Run {item['run_id']}: workflow "
+                        f"{item.get('workflow_status')} / {item.get('workflow_conclusion')}; "
+                        f"job {item.get('job_status')} / {item.get('job_conclusion')}. "
+                        "Overall success is not verified."
+                    )
+                if item.get("queue_seconds") is not None:
+                    st.caption(f"Queue to job start: {item['queue_seconds']:.1f} s")
+                if item.get("job_seconds") is not None:
+                    st.caption(f"Job duration: {item['job_seconds']:.1f} s")
+                rows = [
+                    {"Step": row["name"], "Seconds": row["seconds"],
+                     "Conclusion": row["conclusion"]}
+                    for row in item.get("steps", [])
+                    if row.get("seconds") is not None
+                ]
+                if rows:
+                    st.dataframe(rows, hide_index=True, use_container_width=True)
+            st.caption(
+                "GitHub job timing includes Docker initialization, model-cache restoration "
+                "and artifact upload. These are measured from official step timestamps."
+            )
+        else:
+            reports = []
+
+        if worker_perf or reports:
+            payload = {
+                "worker": worker_perf,
+                "github": reports,
+                "note": "Performance measurements only; not a chemical accuracy validation.",
+            }
+            st.download_button(
+                "Download timing report (JSON)",
+                json.dumps(payload, indent=2).encode("utf-8"),
+                file_name=f"panChem_performance_{current_run or 'builds'}.json",
+                mime="application/json",
+                key="perf-report-download",
+            )
+
+
 recent_jobs()
+performance_diagnostics_panel()
 
 st.caption("Check extracted structures against the original PDF before using them.")
