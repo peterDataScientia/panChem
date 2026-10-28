@@ -27,6 +27,8 @@ def publish(stage, **payload):
         return False
     approved = {"page", "total_pages", "structures", "page_structures", "completed_pages", "stage"}
     event = {"stage": str(stage)[:40]}
+    if os.environ.get("GITHUB_RUN_ID", "").isdigit():
+        event["run_id"] = int(os.environ["GITHUB_RUN_ID"])
     for name, value in payload.items():
         if name in approved and isinstance(value, (int, str)) and not isinstance(value, bool):
             event[name] = value
