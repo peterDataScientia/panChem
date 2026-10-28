@@ -6,6 +6,19 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 
 export default defineConfig({
+  plugins: [{
+    name: 'panchem-ketcher-raphael-browser',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!id.replaceAll('\\', '/').includes('ketcher-core/dist/application/ketcher.modern.js')) return;
+      const expression = /require\\(["']raphael["']\\)/g;
+      if (!expression.test(code)) return;
+      return {
+        code: "import Raphael from 'raphael';\\n" + code.replace(expression, 'Raphael'),
+        map: null,
+      };
+    },
+  }],
   base: './',
   resolve: {
     alias: {
