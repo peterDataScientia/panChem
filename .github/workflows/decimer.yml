@@ -96,9 +96,10 @@ jobs:
           PDF_PATH: ${{ inputs.pdf_path }}
           PDF_URL: ${{ inputs.pdf_url }}
           PDF_PAGES: ${{ inputs.pages }}
-          # Set repository variable PANCHEM_PARALLEL_MODEL_PRELOAD=0 to disable
-          # overlapped recognition-model loading without changing source code.
-          PANCHEM_PARALLEL_MODEL_PRELOAD: ${{ vars.PANCHEM_PARALLEL_MODEL_PRELOAD || '1' }}
+          # CPU benchmark: parallel recognition-model preload raised worker time
+          # from 29.914 s to 45.002 s for page 2 (7 structures).
+          # Keep serial lazy loading unless explicitly enabled for A/B tests.
+          PANCHEM_PARALLEL_MODEL_PRELOAD: ${{ vars.PANCHEM_PARALLEL_MODEL_PRELOAD || '0' }}
           TF_CPP_MIN_LOG_LEVEL: "2"
           CUDA_VISIBLE_DEVICES: "-1"
         run: |
