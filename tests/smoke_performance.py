@@ -165,6 +165,10 @@ with tempfile.TemporaryDirectory() as tmp:
     finally:
         os.chdir(cwd)
 
-assert "results/performance.json" in Path(".github/workflows/decimer.yml").read_text()
+workflow = Path(".github/workflows/decimer.yml").read_text()
+assert "results/performance.json" in workflow
+assert workflow.index("name: Save complete DECIMER model cache after inference") > workflow.index("name: Extract selected pages")
+assert "panchem-decimer-models-v2-tf215-decimer281" in workflow
+assert "PANCHEM_PARALLEL_MODEL_PRELOAD:" in workflow
 assert "performance_diagnostics_panel()" in Path("app.py").read_text()
 print("Optimized DECIMER inference, pixel caching, preload switch, timings and artifacts: PASSED")
