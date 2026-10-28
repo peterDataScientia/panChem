@@ -9,7 +9,7 @@
 small{display:block;margin-top:5px;color:#64748b}
 </style>
 </head>
-<body><div id="status" role="status"><span id="connection"></span><span id="message">Connecting to live progress events…</span><small>No timer-based polling. The connection remains open while this page is open.</small></div>
+<body><div id="status" role="status"><span id="connection"></span><span id="message">Preparing…</span></div>
 <script>
 (function(){
 "use strict";
@@ -20,13 +20,13 @@ function openStream(target){
   if(source){source.close();source=null;}
   topic=target;lastMessageId="";
   if(!/^panchem-[0-9a-f]{12}$/.test(topic)){
-    dot.className="off";msg.textContent="No active extraction job yet.";return;
+    dot.className="off";msg.textContent="Upload a PDF to begin.";return;
   }
-  dot.className="";msg.textContent="Connecting to DECIMER progress stream…";
+  dot.className="";msg.textContent="Connecting…";
   // Server-Sent Events keep one connection open; browser reconnects on network errors.
   source=new EventSource("https://ntfy.sh/"+topic+"/sse?since=30m");
-  source.addEventListener("open",()=>{dot.className="on";msg.textContent="Live DECIMER events connected";});
-  source.onerror=()=>{dot.className="off";msg.textContent="Connection interrupted. Browser is reconnecting automatically…";};
+  source.addEventListener("open",()=>{dot.className="on";msg.textContent="Connected · waiting for progress";});
+  source.onerror=()=>{dot.className="off";msg.textContent="Reconnecting…";};
   source.onmessage=(event)=>{
     try{
       const packet=JSON.parse(event.data);
@@ -36,9 +36,9 @@ function openStream(target){
       if(!["starting","extracting","page_complete","results_ready","failed"].includes(data.stage))return;
       lastMessageId=packet.id;
       let description=data.stage.replace(/_/g," ");
-      if(data.stage==="page_complete")description="Page "+data.page+" complete · "+data.structures+" structures so far";
-      else if(data.stage==="results_ready")description="ZIP artifact ready";
-      else if(data.stage==="failed")description="Extraction failed";
+      if(data.stage==="page_complete")description="Page "+data.page+" complete · "+data.structures+" structures";
+      else if(data.stage==="results_ready")description="Results ready";
+      else if(data.stage==="failed")description="Extraction could not be completed";
       msg.textContent=description;
       tell("streamlit:setComponentValue",{value:{
         id:packet.id,topic:topic,stage:data.stage,
@@ -47,7 +47,7 @@ function openStream(target){
         completed_pages:Number(data.completed_pages||0),
         structures:Number(data.structures||0),page_structures:Number(data.page_structures||0)
       },dataType:"json"});
-    }catch(error){msg.textContent="Ignored invalid progress notification.";}
+    }catch(error){msg.textContent="Connecting…";}
   };
 }
 window.addEventListener("message",(event)=>{
