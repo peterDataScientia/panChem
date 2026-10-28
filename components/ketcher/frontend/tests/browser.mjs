@@ -4,7 +4,7 @@ import { chromium } from 'playwright-core';
 
 const root = new URL('../', import.meta.url).pathname;
 let browser;
-const server = spawn('npm', ['run', '--', 'preview', '--', '--host', '127.0.0.1', '--port', '4178', '--strictPort'], {
+const server = spawn(process.execPath, ['node_modules/vite/bin/vite.js', 'preview', '--host', '127.0.0.1', '--port', '4178', '--strictPort'], {
   cwd: root, stdio: ['ignore', 'pipe', 'pipe']
 });
 let serverLog = '';
@@ -32,7 +32,7 @@ try {
   page.on('pageerror', error => errors.push(error.message));
   await page.goto('http://127.0.0.1:4178/', {waitUntil:'domcontentloaded'});
   await page.waitForFunction(() => !!window.ketcher && typeof window.ketcher.setMolecule === 'function',
-    {timeout:120000});
+    null, {timeout:120000});
   assert.ok(await page.getByRole('button', {name:'Apply structure'}).count(), 'Apply button missing');
   const result = await page.evaluate(async () => {
     await window.ketcher.setMolecule('CCO');
@@ -51,7 +51,7 @@ try {
     });
   });
   await page.getByRole('button', {name:'Apply structure'}).click();
-  await page.waitForFunction(() => window.__panchemMessage?.value?.action === 'apply', {timeout:60000});
+  await page.waitForFunction(() => window.__panchemMessage?.value?.action === 'apply', null, {timeout:60000});
   const event = await page.evaluate(() => window.__panchemMessage);
   assert.ok(event.value.smiles.length>0);
   assert.ok(event.value.molfile.includes('V2000'));
