@@ -3,6 +3,8 @@ import csv
 import hashlib
 import io
 from pathlib import Path
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import time
 import uuid
 import zipfile
@@ -23,6 +25,22 @@ _live_events = components.declare_component(
 REPO = "peterDataScientia/panChem"
 API = f"https://api.github.com/repos/{REPO}"
 WORKFLOW = "decimer.yml"
+EAST_AFRICA = ZoneInfo("Africa/Dar_es_Salaam")
+
+
+def format_eat(value):
+    """Display GitHub's UTC/offset-aware timestamps in East Africa Time."""
+    if not value:
+        return "Time unavailable"
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            raise ValueError("Timestamp has no timezone")
+        return parsed.astimezone(EAST_AFRICA).strftime("%d %b %Y · %H:%M EAT")
+    except (TypeError, AttributeError, ValueError):
+        return "Time unavailable"
+
+
 st.set_page_config(page_title="panChem | DECIMER", page_icon="🧪", layout="wide")
 st.title("🧪 panChem")
 st.caption("Extract chemical structures from research PDFs.")
@@ -341,7 +359,7 @@ def recent_jobs():
                     options=[r["id"] for r in completed],
                     key="recent-run-picker",
                     format_func=lambda run_id: next(
-                        (r.get("created_at", "")[:16].replace("T", " ") + " UTC"
+                        (format_eat(r.get("created_at"))
                          for r in completed if r["id"] == run_id),
                         "Previous analysis",
                     ),
