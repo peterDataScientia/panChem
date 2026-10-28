@@ -1,0 +1,6 @@
+# Keep the DECIMER worker build context tiny.
+# Dockerfile.worker only copies worker-requirements.txt; PDFs and other
+# application files must never be sent as part of the image build context.
+**
+!Dockerfile.worker
+!worker-requirements.txt
