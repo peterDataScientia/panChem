@@ -1,10 +1,12 @@
-name: Streamlit 2D drawing smoke test
+name: Streamlit frontend smoke tests
 on:
   push:
     branches: [main]
     paths:
       - 'app.py'
       - 'chemqa.py'
+      - 'pdf_viewer.py'
+      - 'tests/smoke_pdf_viewer.py'
       - 'requirements.txt'
       - 'packages.txt'
       - 'tests/smoke_2d.py'
@@ -28,6 +30,8 @@ jobs:
       - name: Install frontend dependencies
         run: python -m pip install -r requirements.txt
       - name: Check Python syntax
-        run: python -m compileall -q app.py chemqa.py tests/smoke_2d.py
+        run: python -m compileall -q app.py chemqa.py pdf_viewer.py tests/smoke_2d.py tests/smoke_pdf_viewer.py
       - name: Verify native and fallback molecular 2D drawing
         run: PYTHONPATH=. python tests/smoke_2d.py
+      - name: Verify fullscreen PDF control HTML and JavaScript
+        run: PYTHONPATH=. python tests/smoke_pdf_viewer.py
