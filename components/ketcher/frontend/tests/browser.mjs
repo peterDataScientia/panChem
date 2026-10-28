@@ -45,7 +45,7 @@ try {
       if (!match) continue;
       const bundle = path.join(root, '..', 'dist', 'assets', match[1]);
       if (!fs.existsSync(bundle)) continue;
-      const lines = fs.readFileSync(bundle,'utf8').split('\\n');
+      const lines = fs.readFileSync(bundle,'utf8').split('\n');
       const line = lines[Number(match[2])-1] || '';
       const position = Number(match[3])-1;
       console.error('Failing bundle fragment:', line.slice(Math.max(0,position-300),position+300));
