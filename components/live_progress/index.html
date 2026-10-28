@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+*{box-sizing:border-box}html,body{margin:0;padding:0;background:transparent;font:14px system-ui,-apple-system,sans-serif;color:#263345}
+#status{padding:10px 13px;border:1px solid #d5dfeb;border-radius:9px;line-height:1.4;background:transparent}
+#connection{display:inline-block;width:9px;height:9px;border-radius:50%;background:#a7aeba;margin-right:9px}
+#connection.on{background:#24a26a}#connection.off{background:#ca6666}
+small{display:block;margin-top:5px;color:#64748b}
+</style>
+</head>
+<body><div id="status" role="status"><span id="connection"></span><span id="message">Connecting to live progress events…</span><small>No timer-based polling. The connection remains open while this page is open.</small></div>
+<script>
+(function(){
+"use strict";
+let topic="",source=null,lastMessageId="";
+const msg=document.getElementById("message"),dot=document.getElementById("connection");
+function tell(t,more){window.parent.postMessage(Object.assign({isStreamlitMessage:true,type:t},more||{}),"*");}
+function openStream(target){
+  if(source){source.close();source=null;}
+  topic=target;lastMessageId="";
+  if(!/^panchem-[0-9a-f]{12}$/.test(topic)){
+    dot.className="off";msg.textContent="No active extraction job yet.";return;
+  }
+  dot.className="";msg.textContent="Connecting to DECIMER progress stream…";
+  // Server-Sent Events keep one connection open; browser reconnects on network errors.
+  source=new EventSource("https://ntfy.sh/"+topic+"/sse?since=30m");
+  source.addEventListener("open",()=>{dot.className="on";msg.textContent="Live DECIMER events connected";});
+  source.onerror=()=>{dot.className="off";msg.textContent="Connection interrupted. Browser is reconnecting automatically…";};
+  source.onmessage=(event)=>{
+    try{
+      const packet=JSON.parse(event.data);
+      if(packet.event!=="message" || packet.topic!==topic || !packet.id || packet.id===lastMessageId)return;
+      const data=JSON.parse(packet.message);
+      if(!data || typeof data.stage!=="string")return;
+      if(!["starting","extracting","page_complete","results_ready","failed"].includes(data.stage))return;
+      lastMessageId=packet.id;
+      let description=data.stage.replace(/_/g," ");
+      if(data.stage==="page_complete")description="Page "+data.page+" complete · "+data.structures+" structures so far";
+      else if(data.stage==="results_ready")description="ZIP artifact ready";
+      else if(data.stage==="failed")description="Extraction failed";
+      msg.textContent=description;
+      tell("streamlit:setComponentValue",{value:{
+        id:packet.id,topic:topic,stage:data.stage,
+        page:Number(data.page||0),total_pages:Number(data.total_pages||0),
+        completed_pages:Number(data.completed_pages||0),
+        structures:Number(data.structures||0),page_structures:Number(data.page_structures||0)
+      },dataType:"json"});
+    }catch(error){msg.textContent="Ignored invalid progress notification.";}
+  };
+}
+window.addEventListener("message",(event)=>{
+  if(!event.data || event.data.type!=="streamlit:render")return;
+  const args=event.data.args||{};
+  const next=String(args.topic||"");
+  if(next!==topic)openStream(next);
+  tell("streamlit:setFrameHeight",{height:78});
+});
+tell("streamlit:componentReady",{apiVersion:1});
+})();
+</script></body></html>
