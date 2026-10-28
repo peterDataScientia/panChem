@@ -131,6 +131,11 @@ with tempfile.TemporaryDirectory() as tmp:
     assert result["prediction_timings"][1]["cache_hit"] is True
     assert Path(output, "results.csv").is_file()
     assert Path(output, "results.smi").read_text().startswith("CCO ")
+    with Image.open(output / "page_1_structure_1.png") as saved:
+        np.testing.assert_array_equal(recognition_calls[0], np.asarray(saved.convert("RGB")))
+    with (output / "results.csv").open(encoding="utf-8") as stream:
+        result_lines = stream.read().splitlines()
+    assert len(result_lines) == 3, "Both identical depictions retain separate CSV rows"
 
     # Exercise the other, local-file entrypoint as well.
     cwd = Path.cwd()
