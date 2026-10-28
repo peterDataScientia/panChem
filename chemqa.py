@@ -7,6 +7,7 @@ import zipfile
 from datetime import datetime, timezone
 
 from rdkit import Chem
+from rdkit.Chem import rdDepictor
 from rdkit.Chem import inchi
 
 MARKUSH = re.compile(r"\[(?:R\d*|X\d*|Y\d*|Z\d*|Ar\d*)\]|\bR\d+\b", re.IGNORECASE)
@@ -175,7 +176,7 @@ def rows_from_artifact(blob):
         images = {name: z.read(name) for name in z.namelist() if name.lower().endswith(".png")}
         return rows, images
 
-def make_review_zip(rows, images):
+def make_review_zip(rows, images, molfiles=None):
     buf = io.BytesIO()
     output = []
     now = datetime.now(timezone.utc).isoformat()
@@ -196,6 +197,29 @@ def make_review_zip(rows, images):
             f"{r['canonical_smiles']} page{r.get('page')}_structure{r.get('structure')}"
             for r in output if r.get("qa_status") == "VALID_SYNTAX"
         ))
+        combined_sdf = []
+        for index, row in enumerate(output):
+            if row.get("qa_status") != "VALID_SYNTAX":
+                continue
+            smiles = row.get("canonical_smiles", "")
+            mol = Chem.MolFromSmiles(smiles)
+            if mol is None:
+                continue
+            # Use the hand-drawn Ketcher MOL only if it still matches the
+            # reviewed molecule; otherwise create consistent 2D coordinates.
+            block = (molfiles or {}).get(str(index), "")
+            parsed = Chem.MolFromMolBlock(block, sanitize=True, removeHs=True) if block else None
+            if parsed is None or Chem.MolToSmiles(parsed, isomericSmiles=False) != Chem.MolToSmiles(mol, isomericSmiles=False):
+                molecule = Chem.Mol(mol)
+                rdDepictor.Compute2DCoords(molecule)
+                block = Chem.MolToMolBlock(molecule)
+            label = f"page{row.get('page')}_structure{row.get('structure')}"
+            z.writestr(f"molecules/{label}.mol", block)
+            record = block.rstrip() + "\\n> <SMILES>\\n" + smiles + "\\n\\n$$\\n"
+            z.writestr(f"molecules/{label}.sdf", record)
+            combined_sdf.append(record)
+        if combined_sdf:
+            z.writestr("reviewed_structures.sdf", "".join(combined_sdf))
         for name, data in images.items():
             z.writestr("original_images/" + name.rsplit("/",1)[-1], data)
     return buf.getvalue()
