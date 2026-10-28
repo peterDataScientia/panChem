@@ -25,7 +25,7 @@ API = f"https://api.github.com/repos/{REPO}"
 WORKFLOW = "decimer.yml"
 st.set_page_config(page_title="panChem | DECIMER", page_icon="🧪", layout="wide")
 st.title("🧪 panChem")
-st.caption("Automated chemical structure extraction using GitHub Actions + official DECIMER models.")
+st.caption("Extract chemical structures from research PDFs.")
 
 def github_token():
     try:
@@ -73,61 +73,11 @@ def preview(data, page):
         doc.close()
 
 token = github_token()
-with st.sidebar:
-    st.header("Backend")
-    st.write("GitHub Actions · DECIMER Segmentation + Transformer")
-    st.link_button("Open Actions", f"https://github.com/{REPO}/actions/workflows/{WORKFLOW}")
-    if token:
-        st.success("GitHub token configured")
-        if st.button("Diagnose GitHub token permissions"):
-            try:
-                auth = api_request("GET", "https://api.github.com/user", token).json()
-                repo_info = api_request("GET", API, token).json()
-                st.write("Authenticated GitHub account:", auth.get("login", "unknown"))
-                st.write("Repository:", repo_info.get("full_name", "unknown"))
-                st.json(repo_info.get("permissions", {}))
-                response = requests.get(f"{API}/contents/README.md",
-                    headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"},
-                    timeout=20)
-                st.write("Contents read status:", response.status_code)
-                st.caption("Account push permission does not guarantee fine-grained PAT Contents write access.")
-            except Exception as exc:
-                st.error(f"Authentication diagnostic failed: {exc}")
-        if st.button("Test Contents WRITE permission", key="write-probe"):
-            probe_path = f"jobs/permission-probe-{uuid.uuid4().hex[:10]}.txt"
-            headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
-                       "X-GitHub-Api-Version": "2022-11-28"}
-            try:
-                response = requests.put(f"{API}/contents/{probe_path}", headers=headers,
-                    json={"message": "panChem permission diagnostic", "content": base64.b64encode(b"panChem write diagnostic\\n").decode("ascii")},
-                    timeout=45)
-                st.write("Actual Contents WRITE status:", response.status_code)
-                st.write("GitHub required permission:", response.headers.get("X-Accepted-GitHub-Permissions", "Not provided"))
-                st.write("OAuth scopes:", response.headers.get("X-OAuth-Scopes", "Not provided"))
-                if response.status_code == 201:
-                    st.success("Contents write works. Upload authorization is not the blocker for this token.")
-                    try:
-                        sha = response.json()["content"]["sha"]
-                        cleanup = requests.delete(f"{API}/contents/{probe_path}", headers=headers,
-                            json={"message": "Remove panChem permission probe", "sha": sha}, timeout=45)
-                        st.caption(f"Probe cleanup status: {cleanup.status_code}")
-                    except Exception as cleanup_error:
-                        st.warning(f"Probe cleanup failed: {cleanup_error}")
-                else:
-                    try:
-                        payload = response.json()
-                        st.error(f"GitHub message: {payload.get('message', response.reason)}")
-                        st.caption(str(payload.get("documentation_url", "")))
-                    except ValueError:
-                        st.error(f"GitHub response: {response.reason}")
-                    st.info("If status is 403, check the token's repository selection, effective Contents: Read and write permission, pending approval, and whether Streamlit Secrets holds the latest token.")
-            except requests.RequestException as exc:
-                st.error(f"Write diagnostic connection failed: {exc}")
-    else:
-        st.warning("Add GITHUB_TOKEN in Streamlit App Settings → Secrets. GitHub token requires Contents read/write permission; Actions write is not required.")
-    st.caption("PDFs uploaded to this public repository's jobs/ directory will be publicly accessible until removed.")
+if not token:
+    st.error("Extraction is temporarily unavailable. Contact the app administrator.")
 
-uploaded = st.file_uploader("1. Upload scientific PDF", type="pdf")
+uploaded = st.file_uploader("1. Upload PDF", type="pdf")
+st.caption("Privacy: Uploaded PDFs are stored publicly. Only upload files you are allowed to share.")
 if uploaded:
     data = uploaded.getvalue()
     if len(data) > 25 * 1024 * 1024:
@@ -140,7 +90,7 @@ if uploaded:
     except Exception as e:
         st.error(f"Invalid PDF: {e}")
         st.stop()
-    st.subheader("2. Browse PDF pages")
+    st.subheader("2. Preview pages")
     pdf_hash = hashlib.sha256(data).hexdigest()
     if st.session_state.get("preview_pdf_hash") != pdf_hash:
         st.session_state["preview_pdf_hash"] = pdf_hash
@@ -153,16 +103,16 @@ if uploaded:
     previous_col, slider_col, next_col = st.columns([1, 6, 1], vertical_alignment="bottom")
     with previous_col:
         st.button(
-            "◀ Previous", key="preview_previous", use_container_width=True,
+            "◀ Back", key="preview_previous", use_container_width=True,
             disabled=st.session_state["pdf_preview_page"] <= 1,
             on_click=move_preview, args=(-1,),
         )
     with slider_col:
         if count > 1:
             viewed = st.slider(
-                "Slide through all PDF pages", min_value=1, max_value=count,
+                "Page", min_value=1, max_value=count,
                 step=1, key="pdf_preview_page",
-                help="Drag the slider to preview any page of this PDF.",
+                help="Slide to any page.",
             )
         else:
             viewed = 1
@@ -173,38 +123,32 @@ if uploaded:
             disabled=st.session_state["pdf_preview_page"] >= count,
             on_click=move_preview, args=(1,),
         )
-    st.caption(f"Previewing page {viewed} of {count}. All pages are available on the slider.")
     fullscreen_preview = st.toggle(
-        "Interactive full-page PDF viewer (zoom, page slider, swipe, fullscreen)",
+        "Large interactive preview",
         value=False, key="interactive_pdf_viewer",
-        help="Controls remain available inside the full-page viewer and fullscreen mode.",
+        help="Browse, zoom and view pages fullscreen.",
     )
     if fullscreen_preview:
         components.html(full_page_viewer(data, initial_page=viewed), height=720, scrolling=False)
-        st.caption(
-            "Use controls inside the PDF viewer: previous/next, page number, slider, zoom, "
-            "fit width/page and fullscreen. On mobile, swipe sideways to change pages. "
-            "Browser fullscreen availability depends on device and iframe permissions."
-        )
     else:
         st.image(preview(data, viewed), caption=f"PDF page {viewed} / {count}", width=580)
 
     selected = st.text_input(
-        "3. Pages to extract", value="1",
-        help="Examples: 1,3,5-8. Sliding the preview does not change extraction selection.",
+        "3. Pages to analyze", value="1",
+        help="For example: 1,3,5-8.",
     )
     try:
         pages = pages_list(selected, count)
-        st.caption(f"{len(pages)} pages selected: {', '.join(map(str,pages))}")
+        st.caption(f"{len(pages)} pages selected")
     except ValueError as e:
         st.error(str(e))
         pages = []
-    if st.button("4. Extract all structures with GitHub Actions", type="primary", disabled=not token or not pages):
+    if st.button("4. Extract structures", type="primary", disabled=not token or not pages):
         job_id = uuid.uuid4().hex[:12]
         pdf_path = f"jobs/{job_id}/paper.pdf"
         page_spec = ",".join(map(str, pages))
         try:
-            with st.spinner("Uploading PDF and starting DECIMER job..."):
+            with st.spinner("Starting extraction…"):
                 api_request("PUT", f"{API}/contents/{pdf_path}", token,
                     json={"message": f"panChem PDF job {job_id} pages={page_spec}", "content": base64.b64encode(data).decode("ascii")})
             st.session_state["last_job_id"] = job_id
@@ -215,20 +159,22 @@ if uploaded:
             st.session_state.pop("active_artifact_id", None)
             st.session_state.pop("active_artifact_name", None)
             st.session_state.pop("active_run_id", None)
-            st.success(f"Job {job_id} submitted. Live tracking and results will update automatically below.")
-        except Exception as exc:
-            st.error(str(exc))
+            st.success("Extraction started.")
+        except Exception:
+            import logging
+            logging.exception("PDF submission failed")
+            st.error("Could not start extraction. Please try again.")
 
 @st.fragment
 def live_progress():
     """SSE push updates; no timer and no GitHub polling."""
-    st.subheader("🔴 Live DECIMER extraction · event-driven")
+    st.subheader("Extraction progress")
     wanted = st.session_state.get("last_job_id", "")
     if not token:
-        st.info("Configure GitHub token to enable extraction results.")
+        st.info("Extraction is temporarily unavailable.")
         return
     if not wanted:
-        st.caption("Upload a PDF to start a live event stream. No timed refresh is used.")
+        st.caption("Upload a PDF to start.")
         return
 
     topic = f"panchem-{wanted}"
@@ -277,8 +223,7 @@ def live_progress():
 
     state = st.session_state.get("panchem_live_state", {})
     if state.get("topic") != topic:
-        st.info("Waiting for the DECIMER worker to emit its first event…")
-        st.caption("A persistent live connection replaces the old five-second polling.")
+        st.info("Preparing your document…")
         return
     stage = state.get("stage")
     pages = int(state.get("total_pages") or 0)
@@ -287,37 +232,29 @@ def live_progress():
     if pages:
         st.progress(
             min(completed / pages, 1.0),
-            text=f"Pages completed: {completed}/{pages} · Structures detected: {structures}",
+            text=f"Pages: {completed}/{pages} · Structures: {structures}",
         )
     if stage == "starting":
-        st.info("Runner started. Setting up DECIMER…")
+        st.info("Preparing extraction…")
     elif stage == "extracting":
-        st.info("DECIMER is processing the selected PDF pages.")
+        st.info("Analyzing pages…")
     elif stage == "page_complete":
-        st.success(
-            f"Page {state.get('page')} finished: "
-            f"{state.get('page_structures', 0)} structures. "
-            f"Total detected: {structures}"
-        )
+        st.info(f"Page {state.get('page')} complete · {structures} structures found")
     elif stage == "results_ready":
-        st.success("Extraction archive is ready and will load automatically.")
+        st.success("Done! Loading your results…")
     elif stage == "failed":
-        st.error("The GitHub extraction job failed. Inspect its workflow logs.")
+        st.error("Extraction did not complete. Please try again.")
     if st.session_state.get("panchem_live_error"):
-        st.warning("Results retrieval: " + st.session_state["panchem_live_error"])
+        st.warning("Results could not load. Please try again.")
         if st.button("Retry loading results", key="retry-results"):
             st.session_state.pop("panchem_last_event", None)
             st.rerun()
-    st.caption(
-        "Push notifications arrive as DECIMER emits them. No fixed five-second "
-        "timer; if the live connection drops, the browser reconnects automatically."
-    )
 
 
 live_progress()
 
 st.divider()
-st.subheader("Extracted structures · automatic results")
+st.subheader("Results")
 artifact_id = st.session_state.get("active_artifact_id")
 if artifact_id:
     blob = st.session_state.get(f"artifact-{artifact_id}")
@@ -325,14 +262,14 @@ if artifact_id:
     artifact_name = st.session_state.get("active_artifact_name", f"panChem-extraction-{run_id}")
     if blob:
         st.download_button(
-            "Download original results ZIP", blob, artifact_name + ".zip",
+            "Download results", blob, artifact_name + ".zip",
             mime="application/zip", key=f"download-{artifact_id}",
         )
         try:
             extracted, images = rows_from_artifact(blob)
             st.metric("Structures detected", len(extracted))
             if not extracted:
-                st.info("Extraction succeeded, but no chemical structures were detected.")
+                st.info("No chemical structures were found on these pages.")
             state = st.session_state.setdefault(f"edits-{artifact_id}", {})
             reviewed = []
             for index, original in enumerate(extracted):
@@ -349,10 +286,10 @@ if artifact_id:
                     a, b, c = st.columns([1, 2, 1])
                     with a:
                         if img:
-                            st.image(img, caption="Original detected structure", use_container_width=True)
+                            st.image(img, caption="From PDF", use_container_width=True)
                     with b:
                         value = st.text_area(
-                            "Review or correct SMILES",
+                            "SMILES",
                             value=rec.get("smiles", ""),
                             key=f"edit-{artifact_id}-{index}",
                         )
@@ -360,22 +297,22 @@ if artifact_id:
                         qa_status, canonical, inchikey, mol = assess(value)
                         st.write("QA:", qa_status)
                         if rec.get("error"):
-                            st.warning("DECIMER recognition: " + rec["error"])
+                            st.caption("This structure needs review.")
                         if qa_status == "MARKUSH_REVIEW":
-                            st.info("Variable substituent detected. Chemical review is required.")
+                            st.info("Variable group detected. Please review this structure.")
                         if inchikey:
                             st.code(inchikey, language=None)
                     with c:
                         drawing = molecule_svg(mol) if mol else None
                         if drawing:
-                            st.image(drawing, caption="2D structure from reviewed SMILES", use_container_width=True)
-                            st.download_button("Download 2D SVG", drawing.encode("utf-8"),
+                            st.image(drawing, caption="2D preview", use_container_width=True)
+                            st.download_button("Download SVG", drawing.encode("utf-8"),
                                 file_name=f"panChem_{run_id}_page{rec.get('page')}_structure{rec.get('structure')}.svg",
                                 mime="image/svg+xml", key=f"svg-{artifact_id}-{index}")
                         elif mol:
-                            st.warning("2D rendering failed. Check application logs for RDKit or SVG errors.")
+                            st.warning("2D preview is unavailable for this structure.")
                         else:
-                            st.caption("No valid 2D molecule")
+                            st.caption("Enter a valid SMILES to preview.")
                 qa_status, canonical, inchikey, mol = assess(state[str(index)])
                 rec.update(
                     original_smiles=original.get("smiles", ""),
@@ -390,24 +327,26 @@ if artifact_id:
                 counts = {}
                 for rec in reviewed:
                     counts[rec["qa_status"]] = counts.get(rec["qa_status"], 0) + 1
-                st.write("Chemical QA summary:", counts)
+                st.write("Structure checks:", counts)
                 st.download_button(
-                    "Download reviewed CSV, SMI, JSON and images",
+                    "Download reviewed results",
                     make_review_zip(reviewed, images),
                     f"panChem_reviewed_{run_id}.zip",
                     mime="application/zip", key=f"reviewed-{artifact_id}",
                 )
         except Exception as exc:
-            st.warning(f"Cannot display extracted structures: {exc}")
+            import logging
+            logging.exception("Could not display extracted structures")
+            st.warning("Results could not be displayed. Please try again.")
 else:
-    st.caption("Results will appear here automatically when the current extraction succeeds.")
+    st.caption("Your structures will appear here when extraction finishes.")
 
 @st.fragment
 def recent_jobs():
     """Lightweight job-history refresh; never rerender the chemical editor."""
     if not token:
         return
-    with st.expander("Recent jobs · automatically updated", expanded=False):
+    with st.expander("Previous analyses", expanded=False):
         try:
             runs = api_request(
                 "GET", f"{API}/actions/workflows/{WORKFLOW}/runs",
@@ -416,20 +355,21 @@ def recent_jobs():
             if not runs:
                 st.caption("No extraction jobs yet.")
                 return
-            for run in runs:
-                status = run.get("conclusion") or run.get("status")
-                msg = (run.get("head_commit") or {}).get("message", "")
-                st.write(f"Run #{run['id']}: {status} · {msg}")
             completed = [
                 r for r in runs if r.get("conclusion") == "success"
             ]
             if completed:
                 selected = st.selectbox(
-                    "Load results from a previous successful run",
+                    "Choose a previous analysis",
                     options=[r["id"] for r in completed],
                     key="recent-run-picker",
+                    format_func=lambda run_id: next(
+                        (r.get("created_at", "")[:16].replace("T", " ") + " UTC"
+                         for r in completed if r["id"] == run_id),
+                        "Previous analysis",
+                    ),
                 )
-                if st.button("Open previous results", key="open-history"):
+                if st.button("Open results", key="open-history"):
                     artifacts = api_request(
                         "GET", f"{API}/actions/runs/{selected}/artifacts", token,
                     ).json().get("artifacts", [])
@@ -449,8 +389,10 @@ def recent_jobs():
                         st.session_state["active_run_id"] = selected
                         st.rerun()
         except Exception as exc:
-            st.warning(f"Recent job list unavailable: {exc}")
+            import logging
+            logging.exception("History retrieval failed")
+            st.warning("Previous analyses could not be loaded.")
 
 recent_jobs()
 
-st.caption("Validate chemical structures against the source figures. Valid SMILES syntax does not guarantee correct recognition.")
+st.caption("Check extracted structures against the original PDF before using them.")
