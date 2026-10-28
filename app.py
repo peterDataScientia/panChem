@@ -90,48 +90,13 @@ if uploaded:
     except Exception as e:
         st.error(f"Invalid PDF: {e}")
         st.stop()
-    st.subheader("2. Preview pages")
-    pdf_hash = hashlib.sha256(data).hexdigest()
-    if st.session_state.get("preview_pdf_hash") != pdf_hash:
-        st.session_state["preview_pdf_hash"] = pdf_hash
-        st.session_state["pdf_preview_page"] = 1
-
-    def move_preview(delta):
-        current = st.session_state.get("pdf_preview_page", 1)
-        st.session_state["pdf_preview_page"] = max(1, min(count, current + delta))
-
-    previous_col, slider_col, next_col = st.columns([1, 6, 1], vertical_alignment="bottom")
-    with previous_col:
-        st.button(
-            "◀ Back", key="preview_previous", use_container_width=True,
-            disabled=st.session_state["pdf_preview_page"] <= 1,
-            on_click=move_preview, args=(-1,),
-        )
-    with slider_col:
-        if count > 1:
-            viewed = st.slider(
-                "Page", min_value=1, max_value=count,
-                step=1, key="pdf_preview_page",
-                help="Slide to any page.",
-            )
-        else:
-            viewed = 1
-            st.caption("Single-page PDF")
-    with next_col:
-        st.button(
-            "Next ▶", key="preview_next", use_container_width=True,
-            disabled=st.session_state["pdf_preview_page"] >= count,
-            on_click=move_preview, args=(1,),
-        )
-    fullscreen_preview = st.toggle(
-        "Large interactive preview",
-        value=False, key="interactive_pdf_viewer",
-        help="Browse, zoom and view pages fullscreen.",
+    st.subheader("2. PDF preview")
+    # Interactive page controls live in the viewer, including when fullscreen.
+    components.html(
+        full_page_viewer(data),
+        height=760,
+        scrolling=False,
     )
-    if fullscreen_preview:
-        components.html(full_page_viewer(data, initial_page=viewed), height=720, scrolling=False)
-    else:
-        st.image(preview(data, viewed), caption=f"PDF page {viewed} / {count}", width=580)
 
     selected = st.text_input(
         "3. Pages to analyze", value="1",
