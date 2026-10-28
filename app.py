@@ -2,6 +2,7 @@ import base64
 import csv
 import hashlib
 import io
+from pathlib import Path
 import time
 import uuid
 import zipfile
@@ -14,6 +15,10 @@ import streamlit.components.v1 as components
 from PIL import Image
 from chemqa import assess, molecule_svg, rows_from_artifact, make_review_zip
 from pdf_viewer import full_page_viewer
+
+_live_events = components.declare_component(
+    "panchem_live_events", path=str(Path(__file__).parent / "components" / "live_progress")
+)
 
 REPO = "peterDataScientia/panChem"
 API = f"https://api.github.com/repos/{REPO}"
@@ -203,6 +208,9 @@ if uploaded:
                 api_request("PUT", f"{API}/contents/{pdf_path}", token,
                     json={"message": f"panChem PDF job {job_id} pages={page_spec}", "content": base64.b64encode(data).decode("ascii")})
             st.session_state["last_job_id"] = job_id
+            st.session_state.pop("panchem_live_state", None)
+            st.session_state.pop("panchem_last_event", None)
+            st.session_state.pop("panchem_live_error", None)
             st.session_state.pop("manual_view_run_id", None)
             st.session_state.pop("active_artifact_id", None)
             st.session_state.pop("active_artifact_name", None)
@@ -211,121 +219,99 @@ if uploaded:
         except Exception as exc:
             st.error(str(exc))
 
-@st.fragment(run_every="5s")
+@st.fragment
 def live_progress():
-    """Only this monitor redraws; PDF upload and SMILES editors stay untouched."""
-    st.subheader("🔴 Live DECIMER extraction")
+    """SSE push updates; no timer and no GitHub polling."""
+    st.subheader("🔴 Live DECIMER extraction · event-driven")
+    wanted = st.session_state.get("last_job_id", "")
     if not token:
-        st.info("Configure GITHUB_TOKEN to enable automatic job tracking.")
+        st.info("Configure GitHub token to enable extraction results.")
         return
-    wanted = st.session_state.get("last_job_id")
-    try:
-        response = api_request(
-            "GET", f"{API}/actions/workflows/{WORKFLOW}/runs", token,
-            params={"per_page": 30, "event": "push"},
-        ).json()
-        runs = response.get("workflow_runs", [])
-        if wanted:
-            target = next(
-                (run for run in runs
-                 if f"panChem PDF job {wanted} " in
-                 (run.get("head_commit") or {}).get("message", "")),
-                None,
-            )
-            if target is None:
-                st.info(f"Job {wanted} submitted. Waiting for GitHub Actions to register it…")
-                st.caption("Checking automatically every 5 seconds. No Refresh button needed.")
-                return
-        else:
-            target = next(
-                (run for run in runs
-                 if (run.get("head_commit") or {}).get("message", "")
-                 .startswith("panChem PDF job ")),
-                None,
-            )
-            if target is None:
-                st.caption("Upload a PDF to see its extraction progress in real time.")
-                return
+    if not wanted:
+        st.caption("Upload a PDF to start a live event stream. No timed refresh is used.")
+        return
 
-        run_id = target["id"]
-        status = target.get("conclusion") or target.get("status", "unknown")
-        message = (target.get("head_commit") or {}).get("message", "")
-        st.write(f"**{message or ('Run #' + str(run_id))}**")
-        st.caption(f"GitHub Actions run #{run_id} · {status.upper()} · polling every 5 seconds")
-        st.link_button("Open detailed GitHub logs", target["html_url"])
+    topic = f"panchem-{wanted}"
+    event = _live_events(topic=topic, key=f"push-{wanted}", default=None)
+    if isinstance(event, dict) and event.get("topic") == topic:
+        unique = event.get("id")
+        marker = f"{wanted}:{unique}"
+        if unique and st.session_state.get("panchem_last_event") != marker:
+            st.session_state["panchem_last_event"] = marker
+            st.session_state["panchem_live_state"] = dict(event)
+            if event.get("stage") == "results_ready":
+                run_id = int(event.get("run_id") or 0)
+                if run_id:
+                    try:
+                        # Authenticate and match the GitHub run to the submitted job.
+                        run = api_request(
+                            "GET", f"{API}/actions/runs/{run_id}", token,
+                        ).json()
+                        msg = (run.get("head_commit") or {}).get("message", "")
+                        if f"panChem PDF job {wanted} " not in msg:
+                            raise ValueError("The completion event does not match the submitted job.")
+                        artifacts = api_request(
+                            "GET", f"{API}/actions/runs/{run_id}/artifacts", token,
+                        ).json().get("artifacts", [])
+                        available = [
+                            a for a in artifacts
+                            if not a.get("expired") and
+                            a.get("name", "").startswith("panChem-extraction-")
+                        ]
+                        if not available:
+                            raise ValueError("GitHub has not published the result archive yet.")
+                        art = available[0]
+                        aid = art["id"]
+                        if f"artifact-{aid}" not in st.session_state:
+                            st.session_state[f"artifact-{aid}"] = api_request(
+                                "GET", f"{API}/actions/artifacts/{aid}/zip", token,
+                            ).content
+                        if st.session_state.get("manual_view_run_id") is None:
+                            st.session_state["active_artifact_id"] = aid
+                            st.session_state["active_artifact_name"] = art["name"]
+                            st.session_state["active_run_id"] = run_id
+                        st.session_state.pop("panchem_live_error", None)
+                        st.rerun(scope="app")
+                    except Exception as exc:
+                        st.session_state["panchem_live_error"] = str(exc)
 
-        job_response = api_request(
-            "GET", f"{API}/actions/runs/{run_id}/jobs", token,
-            params={"per_page": 30},
-        ).json()
-        steps = [step for job in job_response.get("jobs", [])
-                 for step in job.get("steps", [])]
-        meaningful = [
-            step for step in steps if not step.get("name", "").startswith(
-                ("Post ", "Complete job", "Stop containers")
-            )
-        ]
-        passed = sum(step.get("conclusion") == "success" for step in meaningful)
-        total = len(meaningful)
-        if total:
-            st.progress(passed / total, text=f"Pipeline: {passed}/{total} stages passed")
-        active = next(
-            (step for step in meaningful if step.get("status") == "in_progress"),
-            None,
+    state = st.session_state.get("panchem_live_state", {})
+    if state.get("topic") != topic:
+        st.info("Waiting for the DECIMER worker to emit its first event…")
+        st.caption("A persistent live connection replaces the old five-second polling.")
+        return
+    stage = state.get("stage")
+    pages = int(state.get("total_pages") or 0)
+    completed = int(state.get("completed_pages") or 0)
+    structures = int(state.get("structures") or 0)
+    if pages:
+        st.progress(
+            min(completed / pages, 1.0),
+            text=f"Pages completed: {completed}/{pages} · Structures detected: {structures}",
         )
-        failed = next(
-            (step for step in meaningful if step.get("conclusion") == "failure"),
-            None,
+    if stage == "starting":
+        st.info("Runner started. Setting up DECIMER…")
+    elif stage == "extracting":
+        st.info("DECIMER is processing the selected PDF pages.")
+    elif stage == "page_complete":
+        st.success(
+            f"Page {state.get('page')} finished: "
+            f"{state.get('page_structures', 0)} structures. "
+            f"Total detected: {structures}"
         )
-        if failed or status in ("failure", "cancelled", "timed_out"):
-            st.error(f"Extraction failed: {failed['name']}" if failed else f"Job {status}.")
-        elif active:
-            st.info("⚙️ Running now: " + active["name"])
-        elif status == "queued":
-            st.info("⏳ Waiting for a runner.")
-        elif status == "success":
-            st.success("Extraction complete. Loading detected structures automatically…")
-        else:
-            st.info("GitHub is preparing or finishing the job.")
-        if meaningful:
-            with st.expander("Live pipeline steps", expanded=bool(failed)):
-                for step in meaningful:
-                    state = step.get("conclusion") or step.get("status", "pending")
-                    symbol = (
-                        "✅" if state == "success"
-                        else "❌" if state == "failure"
-                        else "🔄" if state == "in_progress"
-                        else "⏳"
-                    )
-                    st.write(f"{symbol} {step['name']} — {state}")
-
-        if status == "success":
-            artifact_info = api_request(
-                "GET", f"{API}/actions/runs/{run_id}/artifacts", token,
-            ).json()
-            artifacts = [
-                artifact for artifact in artifact_info.get("artifacts", [])
-                if not artifact.get("expired")
-            ]
-            if not artifacts:
-                st.info("Job succeeded; waiting for its ZIP artifact to appear.")
-                return
-            artifact = artifacts[0]
-            aid = artifact["id"]
-            cache_key = f"artifact-{aid}"
-            if cache_key not in st.session_state:
-                st.session_state[cache_key] = api_request(
-                    "GET", f"{API}/actions/artifacts/{aid}/zip", token,
-                ).content
-            if (st.session_state.get("manual_view_run_id") is None
-                    and st.session_state.get("active_artifact_id") != aid):
-                st.session_state["active_artifact_id"] = aid
-                st.session_state["active_artifact_name"] = artifact["name"]
-                st.session_state["active_run_id"] = run_id
-                st.rerun()
-            st.success("Results available below. No manual retrieval required.")
-    except Exception as exc:
-        st.warning(f"Live GitHub update temporarily unavailable: {exc}")
+    elif stage == "results_ready":
+        st.success("Extraction archive is ready and will load automatically.")
+    elif stage == "failed":
+        st.error("The GitHub extraction job failed. Inspect its workflow logs.")
+    if st.session_state.get("panchem_live_error"):
+        st.warning("Results retrieval: " + st.session_state["panchem_live_error"])
+        if st.button("Retry loading results", key="retry-results"):
+            st.session_state.pop("panchem_last_event", None)
+            st.rerun()
+    st.caption(
+        "Push notifications arrive as DECIMER emits them. No fixed five-second "
+        "timer; if the live connection drops, the browser reconnects automatically."
+    )
 
 
 live_progress()
@@ -416,7 +402,7 @@ if artifact_id:
 else:
     st.caption("Results will appear here automatically when the current extraction succeeds.")
 
-@st.fragment(run_every="15s")
+@st.fragment
 def recent_jobs():
     """Lightweight job-history refresh; never rerender the chemical editor."""
     if not token:
