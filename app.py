@@ -154,154 +154,262 @@ if uploaded:
                 api_request("PUT", f"{API}/contents/{pdf_path}", token,
                     json={"message": f"panChem PDF job {job_id} pages={page_spec}", "content": base64.b64encode(data).decode("ascii")})
             st.session_state["last_job_id"] = job_id
-            st.success(f"Uploaded job {job_id}. GitHub Actions starts automatically on push; click Refresh jobs to check progress.")
+            st.session_state.pop("active_artifact_id", None)
+            st.session_state.pop("active_artifact_name", None)
+            st.session_state.pop("active_run_id", None)
+            st.success(f"Job {job_id} submitted. Live tracking and results will update automatically below.")
         except Exception as exc:
             st.error(str(exc))
 
-@st.fragment(run_every="10s")
+@st.fragment(run_every="5s")
 def live_progress():
-    st.subheader("Live extraction monitor")
+    """Only this monitor redraws; PDF upload and SMILES editors stay untouched."""
+    st.subheader("🔴 Live DECIMER extraction")
     if not token:
-        st.info("Configure GitHub token to enable live progress.")
+        st.info("Configure GITHUB_TOKEN to enable automatic job tracking.")
         return
+    wanted = st.session_state.get("last_job_id")
     try:
-        response = api_request("GET", f"{API}/actions/workflows/{WORKFLOW}/runs",
-                               token, params={"per_page": 20, "event": "push"}).json()
+        response = api_request(
+            "GET", f"{API}/actions/workflows/{WORKFLOW}/runs", token,
+            params={"per_page": 30, "event": "push"},
+        ).json()
         runs = response.get("workflow_runs", [])
-        wanted = st.session_state.get("last_job_id")
-        target = next((r for r in runs if wanted and
-                       f"panChem PDF job {wanted} " in (r.get("head_commit") or {}).get("message", "")), None)
-        if target is None and wanted:
-            st.info(f"Job {wanted}: waiting for GitHub to register the run. Automatic refresh every 10 seconds.")
-            return
-        if target is None:
-            st.caption("Submit a PDF to track its progress live.")
-            return
-        rid = target["id"]
+        if wanted:
+            target = next(
+                (run for run in runs
+                 if f"panChem PDF job {wanted} " in
+                 (run.get("head_commit") or {}).get("message", "")),
+                None,
+            )
+            if target is None:
+                st.info(f"Job {wanted} submitted. Waiting for GitHub Actions to register it…")
+                st.caption("Checking automatically every 5 seconds. No Refresh button needed.")
+                return
+        else:
+            target = next(
+                (run for run in runs
+                 if (run.get("head_commit") or {}).get("message", "")
+                 .startswith("panChem PDF job ")),
+                None,
+            )
+            if target is None:
+                st.caption("Upload a PDF to see its extraction progress in real time.")
+                return
+
+        run_id = target["id"]
         status = target.get("conclusion") or target.get("status", "unknown")
-        st.write(f"**Job {wanted} · Run #{rid} · {status.upper()}**")
-        st.link_button("Open full GitHub logs", target["html_url"])
-        job_payload = api_request("GET", f"{API}/actions/runs/{rid}/jobs",
-                                  token, params={"per_page": 30}).json()
-        jobs = job_payload.get("jobs", [])
-        steps = [step for job in jobs for step in job.get("steps", [])]
-        relevant = [step for step in steps if not step.get("name", "").startswith(("Post ", "Complete job"))]
-        finished = sum(step.get("status") == "completed" for step in relevant)
-        total = len(relevant)
-        st.progress(finished / total if total else 0,
-                    text=f"Pipeline steps: {finished}/{total} complete")
-        active = next((step for step in relevant if step.get("status") == "in_progress"), None)
-        if active:
-            st.info("Currently running: " + active["name"])
+        message = (target.get("head_commit") or {}).get("message", "")
+        st.write(f"**{message or ('Run #' + str(run_id))}**")
+        st.caption(f"GitHub Actions run #{run_id} · {status.upper()} · polling every 5 seconds")
+        st.link_button("Open detailed GitHub logs", target["html_url"])
+
+        job_response = api_request(
+            "GET", f"{API}/actions/runs/{run_id}/jobs", token,
+            params={"per_page": 30},
+        ).json()
+        steps = [step for job in job_response.get("jobs", [])
+                 for step in job.get("steps", [])]
+        meaningful = [
+            step for step in steps if not step.get("name", "").startswith(
+                ("Post ", "Complete job", "Stop containers")
+            )
+        ]
+        passed = sum(step.get("conclusion") == "success" for step in meaningful)
+        total = len(meaningful)
+        if total:
+            st.progress(passed / total, text=f"Pipeline: {passed}/{total} stages passed")
+        active = next(
+            (step for step in meaningful if step.get("status") == "in_progress"),
+            None,
+        )
+        failed = next(
+            (step for step in meaningful if step.get("conclusion") == "failure"),
+            None,
+        )
+        if failed or status in ("failure", "cancelled", "timed_out"):
+            st.error(f"Extraction failed: {failed['name']}" if failed else f"Job {status}.")
+        elif active:
+            st.info("⚙️ Running now: " + active["name"])
         elif status == "queued":
-            st.info("Waiting for a GitHub runner")
+            st.info("⏳ Waiting for a runner.")
         elif status == "success":
-            st.success("DECIMER job finished. Retrieve the artifact below.")
-        elif status == "failure":
-            st.error("Job failed. Open GitHub logs to inspect the error.")
-        if steps:
-            with st.expander("Pipeline stages", expanded=status != "success"):
-                for step in relevant:
+            st.success("Extraction complete. Loading detected structures automatically…")
+        else:
+            st.info("GitHub is preparing or finishing the job.")
+        if meaningful:
+            with st.expander("Live pipeline steps", expanded=bool(failed)):
+                for step in meaningful:
                     state = step.get("conclusion") or step.get("status", "pending")
-                    mark = "✅" if state == "success" else ("❌" if state == "failure" else ("🔄" if state == "in_progress" else "⏳"))
-                    st.write(f"{mark} {step['name']} — {state}")
-        st.caption("Updates every 10 seconds. Step progress reflects GitHub Actions stages, not an estimated percentage of PDF pages.")
+                    symbol = (
+                        "✅" if state == "success"
+                        else "❌" if state == "failure"
+                        else "🔄" if state == "in_progress"
+                        else "⏳"
+                    )
+                    st.write(f"{symbol} {step['name']} — {state}")
+
+        if status == "success":
+            artifact_info = api_request(
+                "GET", f"{API}/actions/runs/{run_id}/artifacts", token,
+            ).json()
+            artifacts = [
+                artifact for artifact in artifact_info.get("artifacts", [])
+                if not artifact.get("expired")
+            ]
+            if not artifacts:
+                st.info("Job succeeded; waiting for its ZIP artifact to appear.")
+                return
+            artifact = artifacts[0]
+            aid = artifact["id"]
+            cache_key = f"artifact-{aid}"
+            if cache_key not in st.session_state:
+                st.session_state[cache_key] = api_request(
+                    "GET", f"{API}/actions/artifacts/{aid}/zip", token,
+                ).content
+            if st.session_state.get("active_artifact_id") != aid:
+                st.session_state["active_artifact_id"] = aid
+                st.session_state["active_artifact_name"] = artifact["name"]
+                st.session_state["active_run_id"] = run_id
+                st.rerun()
+            st.success("Results available below. No manual retrieval required.")
     except Exception as exc:
-        st.warning(f"Live monitor temporarily unavailable: {exc}")
+        st.warning(f"Live GitHub update temporarily unavailable: {exc}")
+
 
 live_progress()
 
 st.divider()
-st.subheader("Job status and downloads")
-if token:
-    if st.button("Refresh jobs"):
-        st.rerun()
-    try:
-        runs = api_request("GET", f"{API}/actions/workflows/{WORKFLOW}/runs", token,
-                           params={"per_page": 25, "event": "push"}).json().get("workflow_runs", [])
-        if not runs:
-            st.info("No Actions jobs found yet.")
-        for run in runs:
-            run_id = run["id"]
-            label = f"Run #{run_id} · {run.get('conclusion') or run['status']} · {run['created_at']}"
-            with st.expander(label, expanded=False):
-                st.link_button("View logs on GitHub", run["html_url"])
-                if run["status"] == "completed":
-                    artifacts = api_request("GET", f"{API}/actions/runs/{run_id}/artifacts",token).json().get("artifacts", [])
-                    if not artifacts:
-                        st.warning("No results artifact. Check workflow logs.")
-                    for artifact in artifacts:
-                        if artifact.get("expired"): continue
-                        aid = artifact["id"]
-                        if st.button(f"Retrieve {artifact['name']}",key=f"fetch-{aid}"):
-                            try:
-                                blob=api_request("GET", f"{API}/actions/artifacts/{aid}/zip", token).content
-                                st.session_state[f"artifact-{aid}"]=blob
-                            except Exception as e:
-                                st.error(str(e))
-                        blob=st.session_state.get(f"artifact-{aid}")
-                        if blob:
-                            st.download_button("Download results ZIP",blob,artifact["name"]+".zip",
-                                               "application/zip",key=f"download-{aid}")
-                            try:
-                                extracted, images = rows_from_artifact(blob)
-                                st.caption(f"{len(extracted)} detected structures")
-                                edits_key = f"edits-{aid}"
-                                if edits_key not in st.session_state:
-                                    st.session_state[edits_key] = {}
-                                state = st.session_state[edits_key]
-                                export = []
-                                for index, original in enumerate(extracted):
-                                    rec = dict(original)
-                                    label = f"Page {rec.get('page')} · Structure {rec.get('structure')}"
-                                    name = rec.get("image", "")
-                                    img = images.get(name, next((data for p, data in images.items() if p.endswith("/"+name)), None))
-                                    with st.expander(label, expanded=index < 2):
-                                        a, b, c = st.columns([1, 2, 1])
-                                        with a:
-                                            if img:
-                                                st.image(img, caption="Original detected image", use_container_width=True)
-                                        with b:
-                                            value = st.text_area("Review or correct SMILES",
-                                                value=rec.get("smiles", ""),
-                                                key=f"edit-{aid}-{index}")
-                                            state[str(index)] = value
-                                            status, canonical, inchikey, mol = assess(value)
-                                            st.write("QA:", status)
-                                            if rec.get("error"):
-                                                st.warning("DECIMER recognition: " + rec["error"])
-                                            if status == "MARKUSH_REVIEW":
-                                                st.info("Variable substituent detected. Requires explicit chemical interpretation; not treated as a concrete molecule.")
-                                            if inchikey:
-                                                st.code(inchikey, language=None)
-                                        with c:
-                                            drawing = molecule_svg(mol) if mol else None
-                                            if drawing:
-                                                st.image(drawing, caption="RDKit reconstruction")
-                                            elif mol:
-                                                st.info("2D drawing unavailable on this deployment. SMILES validation remains enabled.")
-                                            else:
-                                                st.caption("No valid 2D structure to render")
-                                    status, canonical, inchikey, mol = assess(state[str(index)])
-                                    rec.update(original_smiles=original.get("smiles", ""),
-                                               reviewed_smiles=state[str(index)],
-                                               canonical_smiles=canonical,
-                                               inchikey=inchikey,
-                                               qa_status=status,
-                                               source_run_id=run_id)
-                                    export.append(rec)
-                                statuses = {}
-                                for rec in export:
-                                    statuses[rec["qa_status"]] = statuses.get(rec["qa_status"], 0) + 1
-                                st.write("Chemical QA summary", statuses)
-                                st.download_button("Download reviewed CSV, SMI, JSON and images",
-                                    make_review_zip(export, images), f"panChem_reviewed_{run_id}.zip",
-                                    mime="application/zip", key=f"reviewed-{aid}")
-
-                            except Exception as exc:
-                                st.warning(f"Preview unavailable: {exc}")
-    except Exception as exc:
-        st.error(f"Actions status unavailable: {exc}")
+st.subheader("Extracted structures · automatic results")
+artifact_id = st.session_state.get("active_artifact_id")
+if artifact_id:
+    blob = st.session_state.get(f"artifact-{artifact_id}")
+    run_id = st.session_state.get("active_run_id")
+    artifact_name = st.session_state.get("active_artifact_name", f"panChem-extraction-{run_id}")
+    if blob:
+        st.download_button(
+            "Download original results ZIP", blob, artifact_name + ".zip",
+            mime="application/zip", key=f"download-{artifact_id}",
+        )
+        try:
+            extracted, images = rows_from_artifact(blob)
+            st.metric("Structures detected", len(extracted))
+            if not extracted:
+                st.info("Extraction succeeded, but no chemical structures were detected.")
+            state = st.session_state.setdefault(f"edits-{artifact_id}", {})
+            reviewed = []
+            for index, original in enumerate(extracted):
+                rec = dict(original)
+                label = f"Page {rec.get('page')} · Structure {rec.get('structure')}"
+                name = rec.get("image", "")
+                img = images.get(
+                    name, next(
+                        (data for p, data in images.items() if p.endswith("/" + name)),
+                        None,
+                    ),
+                )
+                with st.expander(label, expanded=index < 2):
+                    a, b, c = st.columns([1, 2, 1])
+                    with a:
+                        if img:
+                            st.image(img, caption="Original detected structure", use_container_width=True)
+                    with b:
+                        value = st.text_area(
+                            "Review or correct SMILES",
+                            value=rec.get("smiles", ""),
+                            key=f"edit-{artifact_id}-{index}",
+                        )
+                        state[str(index)] = value
+                        qa_status, canonical, inchikey, mol = assess(value)
+                        st.write("QA:", qa_status)
+                        if rec.get("error"):
+                            st.warning("DECIMER recognition: " + rec["error"])
+                        if qa_status == "MARKUSH_REVIEW":
+                            st.info("Variable substituent detected. Chemical review is required.")
+                        if inchikey:
+                            st.code(inchikey, language=None)
+                    with c:
+                        drawing = molecule_svg(mol) if mol else None
+                        if drawing:
+                            st.image(drawing, caption="RDKit reconstruction")
+                        elif mol:
+                            st.info("2D renderer unavailable. SMILES validation remains enabled.")
+                        else:
+                            st.caption("No valid 2D molecule")
+                qa_status, canonical, inchikey, mol = assess(state[str(index)])
+                rec.update(
+                    original_smiles=original.get("smiles", ""),
+                    reviewed_smiles=state[str(index)],
+                    canonical_smiles=canonical,
+                    inchikey=inchikey,
+                    qa_status=qa_status,
+                    source_run_id=run_id,
+                )
+                reviewed.append(rec)
+            if reviewed:
+                counts = {}
+                for rec in reviewed:
+                    counts[rec["qa_status"]] = counts.get(rec["qa_status"], 0) + 1
+                st.write("Chemical QA summary:", counts)
+                st.download_button(
+                    "Download reviewed CSV, SMI, JSON and images",
+                    make_review_zip(reviewed, images),
+                    f"panChem_reviewed_{run_id}.zip",
+                    mime="application/zip", key=f"reviewed-{artifact_id}",
+                )
+        except Exception as exc:
+            st.warning(f"Cannot display extracted structures: {exc}")
 else:
-    st.info("Configure the GitHub token to enable submission, job tracking and downloads.")
+    st.caption("Results will appear here automatically when the current extraction succeeds.")
+
+@st.fragment(run_every="15s")
+def recent_jobs():
+    """Lightweight job-history refresh; never rerender the chemical editor."""
+    if not token:
+        return
+    with st.expander("Recent jobs · automatically updated", expanded=False):
+        try:
+            runs = api_request(
+                "GET", f"{API}/actions/workflows/{WORKFLOW}/runs",
+                token, params={"per_page": 12, "event": "push"},
+            ).json().get("workflow_runs", [])
+            if not runs:
+                st.caption("No extraction jobs yet.")
+                return
+            for run in runs:
+                status = run.get("conclusion") or run.get("status")
+                msg = (run.get("head_commit") or {}).get("message", "")
+                st.write(f"Run #{run['id']}: {status} · {msg}")
+            completed = [
+                r for r in runs if r.get("conclusion") == "success"
+            ]
+            if completed:
+                selected = st.selectbox(
+                    "Load results from a previous successful run",
+                    options=[r["id"] for r in completed],
+                    key="recent-run-picker",
+                )
+                if st.button("Open previous results", key="open-history"):
+                    artifacts = api_request(
+                        "GET", f"{API}/actions/runs/{selected}/artifacts", token,
+                    ).json().get("artifacts", [])
+                    available = [a for a in artifacts if not a.get("expired")]
+                    if not available:
+                        st.warning("This run has no downloadable results artifact.")
+                    else:
+                        art = available[0]
+                        aid = art["id"]
+                        if f"artifact-{aid}" not in st.session_state:
+                            st.session_state[f"artifact-{aid}"] = api_request(
+                                "GET", f"{API}/actions/artifacts/{aid}/zip", token,
+                            ).content
+                        st.session_state["active_artifact_id"] = aid
+                        st.session_state["active_artifact_name"] = art["name"]
+                        st.session_state["active_run_id"] = selected
+                        st.rerun()
+        except Exception as exc:
+            st.warning(f"Recent job list unavailable: {exc}")
+
+recent_jobs()
+
 st.caption("Validate chemical structures against the source figures. Valid SMILES syntax does not guarantee correct recognition.")
