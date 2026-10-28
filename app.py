@@ -449,6 +449,8 @@ def performance_diagnostics_panel():
                 col_a.metric("Worker total", f"{worker_perf.get('total_worker_seconds', 0):.1f} s")
                 col_b.metric("Structures", int(worker_perf.get("total_structures", 0)))
                 col_c.metric("Valid SMILES", int(worker_perf.get("valid_smiles", 0)))
+                if "recognition_cache_hits" in worker_perf:
+                    st.caption(f"Repeated depictions skipped: {worker_perf['recognition_cache_hits']}")
                 if worker_perf.get("model_import_seconds") is not None:
                     st.caption(
                         f"Model module import: {worker_perf['model_import_seconds']:.2f} s. "
@@ -456,9 +458,24 @@ def performance_diagnostics_panel():
                     )
                 if worker_perf.get("pdf_fetch_seconds") is not None:
                     st.caption(f"PDF download: {worker_perf['pdf_fetch_seconds']:.2f} s")
+                if worker_perf.get("recognition_preload_enabled"):
+                    load_time = worker_perf.get("recognition_preload_seconds")
+                    wait_time = worker_perf.get("recognition_preload_wait_seconds")
+                    if load_time is not None:
+                        st.caption(
+                            f"Recognition model preload: {load_time:.2f} s "
+                            f"(wait before inference: {float(wait_time or 0):.2f} s). "
+                            "Loading overlaps segmentation; do not add timings together."
+                        )
+                    else:
+                        st.caption("Recognition model preload was requested; no successful load timing was recorded.")
                 page_records = worker_perf.get("pages", [])
                 if page_records:
                     st.dataframe(page_records, hide_index=True, use_container_width=True)
+                predictions = worker_perf.get("prediction_timings", [])
+                if predictions:
+                    with st.expander("Per-structure recognition timings", expanded=False):
+                        st.dataframe(predictions, hide_index=True, use_container_width=True)
                 st.caption(
                     "Render, segmentation and recognition are measured separately. "
                     "Worker total also includes initialization and result-writing overhead."
