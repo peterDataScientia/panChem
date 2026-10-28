@@ -18,7 +18,7 @@ jobs:
           persist-credentials: true
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '24'
       - name: Install Ketcher and frontend dependencies
         working-directory: components/ketcher/frontend
         run: npm install --legacy-peer-deps --no-audit --no-fund
@@ -40,5 +40,16 @@ jobs:
           git add -f components/ketcher/dist
           if ! git diff --cached --quiet; then
             git commit -m "Publish compiled Ketcher editor for Streamlit [skip ci]"
-            git push origin HEAD:main
+            git fetch origin main
+            git rebase origin/main
+            for attempt in 1 2 3 4; do
+              if git push origin HEAD:main; then
+                echo "Ketcher editor assets published"
+                exit 0
+              fi
+              echo "Branch advanced during publish; rebasing attempt $attempt"
+              git fetch origin main
+              git rebase origin/main
+            done
+            exit 1
           fi
