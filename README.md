@@ -28,5 +28,7 @@ DECIMER recognition and Markush structures must be verified against original sou
 - .github/workflows/frontend-smoke.yml: Python syntax, 2D drawings, interactive PDF viewer, SSE component.
 - .github/workflows/build-worker.yml: builds and publishes the preinstalled DECIMER Docker image.
 - .github/workflows/decimer.yml: actual chemical extraction and artifact output.
+- Each new extraction artifact includes `performance.json` with worker startup, model-import, render, segmentation and recognition wall-clock seconds by page; `results.csv` and SMILES outputs are unchanged.
+- The collapsed **Performance diagnostics** expander in Streamlit can display timing from an opened extraction, fetch official GitHub job-step times on demand, compare the two most recent completed worker-image builds and export a JSON timing report. Older artifacts may not include per-page timing.
 
-**Developer-only diagnostics belong in GitHub workflows and logs, not on the public-facing Streamlit screen.**
+**Keep developer error logs and secrets in GitHub Actions.** The collapsed in-app diagnostics panel exposes only non-sensitive timing and count data, not PDFs, SMILES, filenames or credentials.
