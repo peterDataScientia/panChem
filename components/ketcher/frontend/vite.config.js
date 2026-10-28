@@ -16,6 +16,10 @@ export default defineConfig({
   build: {
     outDir: path.resolve(__dirname, '../dist'),
     emptyOutDir: true,
+    commonjsOptions: {
+      transformMixedEsModules: true,
+      include: [/node_modules/]
+    },
     assetsInlineLimit: 0,
     chunkSizeWarningLimit: 14000,
     sourcemap: false
