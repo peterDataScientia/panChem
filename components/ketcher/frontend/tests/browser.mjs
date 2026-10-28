@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { chromium } from 'playwright-core';
 
@@ -38,6 +40,16 @@ try {
       null, {timeout:45000});
   } catch (error) {
     console.error('Ketcher did not initialize. Browser errors:', errors.slice(-30));
+    for (const detail of errors) {
+      const match = detail.match(/\/assets\/([^/:]+\.js):(\d+):(\d+)/);
+      if (!match) continue;
+      const bundle = path.join(root, '..', 'dist', 'assets', match[1]);
+      if (!fs.existsSync(bundle)) continue;
+      const lines = fs.readFileSync(bundle,'utf8').split('\\n');
+      const line = lines[Number(match[2])-1] || '';
+      const position = Number(match[3])-1;
+      console.error('Failing bundle fragment:', line.slice(Math.max(0,position-300),position+300));
+    }
     console.error('Visible browser body:', (await page.locator('body').innerText()).slice(0,3000));
     await page.screenshot({path:'ketcher-browser-failure.png',fullPage:true});
     throw error;
