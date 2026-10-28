@@ -295,7 +295,12 @@ if artifact_id:
                         )
                         state[str(index)] = value
                         qa_status, canonical, inchikey, mol = assess(value)
-                        st.write("QA:", qa_status)
+                        st.caption({
+                            "VALID_SYNTAX": "SMILES syntax: valid",
+                            "MARKUSH_REVIEW": "Needs review: variable group",
+                            "INVALID_SMILES": "SMILES syntax: invalid",
+                            "MISSING_SMILES": "No SMILES detected",
+                        }.get(qa_status, "Needs review"))
                         if rec.get("error"):
                             st.caption("This structure needs review.")
                         if qa_status == "MARKUSH_REVIEW":
@@ -327,7 +332,14 @@ if artifact_id:
                 counts = {}
                 for rec in reviewed:
                     counts[rec["qa_status"]] = counts.get(rec["qa_status"], 0) + 1
-                st.write("Structure checks:", counts)
+                st.write("Structure checks:", {
+                    {
+                        "VALID_SYNTAX": "SMILES syntax valid",
+                        "MARKUSH_REVIEW": "Variable groups",
+                        "INVALID_SMILES": "Invalid SMILES",
+                        "MISSING_SMILES": "Missing SMILES",
+                    }.get(key, key): value for key, value in counts.items()
+                })
                 st.download_button(
                     "Download reviewed results",
                     make_review_zip(reviewed, images),
