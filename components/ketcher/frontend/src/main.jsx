@@ -71,10 +71,10 @@ function KetcherBridge() {
         setError('Draw a chemical structure before applying your changes.');
         return;
       }
-      // Standalone Ketcher versions may omit the SDF record separator.
-      const normalizedSdf = /\\$\\$\\$\\$/m.test(sdf || '')
+      // Some standalone versions omit the SDF record terminator.
+      const normalizedSdf = /\$\$\$\$/m.test(sdf || '')
         ? sdf
-        : molfile.trimEnd() + '\\n$$\\n';
+        : molfile.trimEnd() + '\n$$$$\n';
       saveResult({
         action: 'apply',
         smiles: smiles.trim(),
