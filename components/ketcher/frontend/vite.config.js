@@ -21,6 +21,7 @@ export default defineConfig({
     }
   }],
   base: './',
+  define: { global: 'globalThis' },
   resolve: {
     alias: {
       'events': require.resolve('events/'),
