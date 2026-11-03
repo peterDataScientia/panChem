@@ -31,4 +31,6 @@ zip_bytes = io.BytesIO()
 with zipfile.ZipFile(zip_bytes, "w") as z:
     z.writestr("results.csv", blob)
 assert len(read_decimer_zip(zip_bytes.getvalue())) == 4
+rejected = candidate_rows([{"smiles": "CCO", "reviewed_smiles": "", "page": "2", "structure": "1"}])
+assert rejected[0]["Status"] == "MISSING_SMILES", "Rejected recognition must not reappear"
 print("DECIMER CSV/ZIP, scaffold grouping, ambiguous entry exclusion, export: PASS")
