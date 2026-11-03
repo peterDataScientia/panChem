@@ -340,6 +340,12 @@ if artifact_id:
                 )
                 reviewed.append(rec)
             if reviewed:
+                # Make current extraction available to scaffold-family curation.
+                # Only validated SMILES are exported there; ambiguous results
+                # remain visible with their original image/page provenance.
+                st.session_state["panchem_builder_source_rows"] = reviewed
+                if st.button("Send compounds to Scaffold Builder", key=f"auto-builder-{artifact_id}"):
+                    st.switch_page("pages/1_Scaffold_R_Group_Builder.py")
                 counts = {}
                 for rec in reviewed:
                     counts[rec["qa_status"]] = counts.get(rec["qa_status"], 0) + 1
