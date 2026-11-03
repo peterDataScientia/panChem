@@ -3,6 +3,7 @@ import csv
 import hashlib
 import io
 import json
+import re
 from pathlib import Path
 import time
 import uuid
@@ -132,6 +133,7 @@ if uploaded:
                     json={"message": f"panChem PDF job {job_id} pages={page_spec}", "content": base64.b64encode(data).decode("ascii")})
             st.session_state["last_job_id"] = job_id
             st.session_state["panchem_source_pdf"] = data
+            st.session_state["panchem_source_job_id"] = job_id
             st.session_state.pop("panchem_builder_source_rows", None)
             st.session_state.pop("pc_auto_results", None)
             st.session_state.pop("pc_auto_source_digest", None)
@@ -588,6 +590,31 @@ def recent_jobs():
                             st.session_state[f"artifact-{aid}"] = api_request(
                                 "GET", f"{API}/actions/artifacts/{aid}/zip", token,
                             ).content
+                        # Recover the matching original PDF for historical
+                        # extraction runs, rather than mixing results with a
+                        # PDF from another job in the current browser session.
+                        st.session_state.pop("panchem_source_pdf", None)
+                        st.session_state.pop("panchem_source_job_id", None)
+                        try:
+                            selected_run = api_request(
+                                "GET", f"{API}/actions/runs/{selected}", token,
+                            ).json()
+                            commit_message = (selected_run.get("head_commit") or {}).get("message", "")
+                            matched = re.search(r"panChem PDF job ([a-f0-9]{12})\b", commit_message)
+                            if matched:
+                                job_id = matched.group(1)
+                                source_json = api_request(
+                                    "GET", f"{API}/contents/jobs/{job_id}/paper.pdf", token
+                                ).json()
+                                import base64 as _base64
+                                pdf_blob = _base64.b64decode(source_json.get("content", ""))
+                                if pdf_blob.startswith(b"%PDF") and len(pdf_blob) <= 25 * 1024 * 1024:
+                                    st.session_state["panchem_source_pdf"] = pdf_blob
+                                    st.session_state["panchem_source_job_id"] = job_id
+                        except Exception:
+                            # Historical results remain reviewable even if the
+                            # source PDF is unavailable; never reuse a wrong PDF.
+                            pass
                         st.session_state["manual_view_run_id"] = selected
                         st.session_state["active_artifact_id"] = aid
                         st.session_state["active_artifact_name"] = art["name"]
