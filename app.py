@@ -444,9 +444,17 @@ if artifact_id:
                     st.dataframe(pd.DataFrame(assembled), hide_index=True, width="stretch")
                     st.metric("Full molecules constructed (candidates)", len(completed))
                     if completed:
-                        for start in range(0, min(len(completed), 24), 3):
+                        max_page = (len(completed) - 1) // 24 + 1
+                        display_page = st.number_input(
+                            "Completed-structure preview page",
+                            min_value=1, max_value=max_page, value=1, step=1,
+                            key=f"markush-preview-page-{artifact_id}"
+                        )
+                        shown = completed[(display_page - 1) * 24:display_page * 24]
+                        st.caption(f"Showing {len(shown)} of {len(completed)} constructed molecular structures")
+                        for start in range(0, len(shown), 3):
                             cols = st.columns(3)
-                            for col, row in zip(cols, completed[start:start + 3]):
+                            for col, row in zip(cols, shown[start:start + 3]):
                                 with col:
                                     st.caption(row["Compound_ID"])
                                     mol = Chem.MolFromSmiles(row["SMILES"])
