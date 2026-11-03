@@ -15,6 +15,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 from PIL import Image
 from chemqa import assess, molecule_svg, rows_from_artifact, make_review_zip
+from auto_compounds import candidate_rows, export_candidates_csv, export_candidates_smi
 from pdf_viewer import full_page_viewer
 from time_utils import format_eat
 from performance_diagnostics import performance_from_artifact, github_timing_report
@@ -125,6 +126,10 @@ if uploaded:
                 api_request("PUT", f"{API}/contents/{pdf_path}", token,
                     json={"message": f"panChem PDF job {job_id} pages={page_spec}", "content": base64.b64encode(data).decode("ascii")})
             st.session_state["last_job_id"] = job_id
+            st.session_state["panchem_source_pdf"] = data
+            st.session_state.pop("panchem_builder_source_rows", None)
+            st.session_state.pop("pc_auto_results", None)
+            st.session_state.pop("pc_auto_source_digest", None)
             st.session_state.pop("panchem_live_state", None)
             st.session_state.pop("panchem_last_event", None)
             st.session_state.pop("panchem_live_error", None)
@@ -344,7 +349,32 @@ if artifact_id:
                 # Only validated SMILES are exported there; ambiguous results
                 # remain visible with their original image/page provenance.
                 st.session_state["panchem_builder_source_rows"] = reviewed
-                if st.button("Send compounds to Scaffold Builder", key=f"auto-builder-{artifact_id}"):
+                # Native, inline DECIMER -> compound curation, no downloads,
+                # re-uploads, or intermediate navigation.
+                auto_rows = candidate_rows(reviewed)
+                st.session_state["pc_auto_results"] = auto_rows
+                st.subheader("Automatic compound analysis")
+                valid_candidates = [r for r in auto_rows if r["Status"] == "VALID_SYNTAX"]
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Structures analyzed", len(auto_rows))
+                c2.metric("Valid candidate SMILES", len(valid_candidates))
+                c3.metric("Need chemical review", len(auto_rows) - len(valid_candidates))
+                with st.expander("Compound and scaffold families", expanded=True):
+                    st.dataframe(pd.DataFrame(auto_rows), hide_index=True, use_container_width=True)
+                    grouped = {}
+                    for r in valid_candidates:
+                        grouped.setdefault(r["Scaffold_SMILES"] or "(acyclic)", []).append(r["Compound_ID"])
+                    for scaffold, members in sorted(grouped.items(), key=lambda item: -len(item[1])):
+                        st.code(scaffold, language=None)
+                        st.caption(f"{len(members)} structures")
+                    st.caption("Murcko grouping requires fully specified structures. Markush R-groups still require chemical review.")
+                    ca, cb = st.columns(2)
+                    ca.download_button("Download compound CSV", export_candidates_csv(auto_rows),
+                                       f"panChem_compounds_{run_id}.csv", "text/csv", key=f"auto-csv-{artifact_id}")
+                    cb.download_button("Download valid SMI", export_candidates_smi(auto_rows),
+                                       f"panChem_compounds_{run_id}.smi", "text/plain",
+                                       disabled=not valid_candidates, key=f"auto-smi-{artifact_id}")
+                if st.button("Open advanced scaffold assembly", key=f"auto-builder-{artifact_id}"):
                     st.switch_page("pages/1_Scaffold_R_Group_Builder.py")
                 counts = {}
                 for rec in reviewed:
