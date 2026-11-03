@@ -1,4 +1,4 @@
-"""Automatic curation of DECIMER results and scaffold-family grouping.
+"""Automatic curation of DECIMER results and scaffold-family grouping.\n\nOnly source-image-confirmed compounds enter SMI export; valid syntax alone\nnever proves fidelity to the PDF chemical drawing.
 
 Automatic grouping only handles fully specified, chemically valid structures.
 Markush scaffold diagrams and textual R-group lookup tables require explicit
@@ -34,6 +34,7 @@ def candidate_rows(extracted):
             elif any(atom.GetNumRadicalElectrons() for atom in mol.GetAtoms()):
                 status = "STRUCTURE_REVIEW"
                 warning = "Radical atom detected: verify the source drawing and attachment markers."
+        confirmed = record.get("verified_against_pdf") is True
         scaffold = ""
         if mol is not None and status == "VALID_SYNTAX":
             try:
@@ -51,6 +52,7 @@ def candidate_rows(extracted):
             "Review": (warning or ("Check source figure and table before publication"
                             if status == "VALID_SYNTAX" else "Manual identification required")),
             "Source": str(record.get("Source") or ""),
+            "Image_verified": "YES" if confirmed and status == "VALID_SYNTAX" else "NO",
         })
     return output
 
@@ -81,5 +83,5 @@ def export_candidates_csv(rows):
 def export_candidates_smi(rows):
     return "".join(
         f"{row['SMILES']}\t{row['Compound_ID']}\n"
-        for row in rows if row["Status"] == "VALID_SYNTAX" and row["SMILES"]
+        for row in rows if row["Status"] == "VALID_SYNTAX" and row["SMILES"] and row.get("Image_verified") == "YES"
     ).encode("utf-8")
