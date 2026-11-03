@@ -8,6 +8,7 @@ import streamlit as st
 from chemqa import molecule_svg
 from pdf_viewer import full_page_viewer
 from scaffold_builder import build_records, export_csv, export_sdf, export_smi
+from auto_compounds import candidate_rows, read_decimer_zip, read_decimer_csv, export_candidates_csv, export_candidates_smi
 
 st.set_page_config(page_title="panChem | Scaffold builder", page_icon="🧪", layout="wide")
 st.title("🧪 panChem")
@@ -15,7 +16,46 @@ st.caption("Extract and curate chemical structures from research PDFs.")
 st.subheader("Scaffold + R-group builder")
 st.caption("Use the same source-document review workflow as panChem DECIMER, with manual scaffold definitions and batch R-group assembly.")
 
-with st.expander("1. Inspect source PDF", expanded=True):
+st.subheader("1. Auto-extract compounds from DECIMER")
+st.caption("Use the latest panChem extraction automatically, or import a DECIMER results ZIP/CSV. Complete SMILES are grouped by RDKit Murcko scaffold; unresolved Markush labels are held for review.")
+extracted = st.session_state.get("panchem_builder_source_rows", [])
+source_file = st.file_uploader("Or import DECIMER results (.zip or .csv)", type=["zip", "csv"], key="pc_auto_source")
+if source_file:
+    try:
+        extracted = (read_decimer_zip(source_file.getvalue()) if source_file.name.lower().endswith(".zip")
+                     else read_decimer_csv(source_file.getvalue()))
+    except Exception as exc:
+        st.error(f"Cannot read DECIMER results: {exc}")
+        extracted = []
+if extracted:
+    st.caption(f"{len(extracted)} source records available.")
+    if st.button("Generate compound set automatically", type="primary", key="pc_auto_run"):
+        st.session_state.pc_auto_results = candidate_rows(extracted)
+if "pc_auto_results" in st.session_state:
+    auto_rows = st.session_state.pc_auto_results
+    valid_auto = [r for r in auto_rows if r["Status"] == "VALID_SYNTAX"]
+    unresolved = [r for r in auto_rows if r["Status"] != "VALID_SYNTAX"]
+    aa, bb, cc = st.columns(3)
+    aa.metric("Detected", len(auto_rows))
+    bb.metric("Valid candidates", len(valid_auto))
+    cc.metric("Need review", len(unresolved))
+    st.dataframe(pd.DataFrame(auto_rows), hide_index=True, width="stretch")
+    scaffold_groups = {}
+    for rec in valid_auto:
+        scaffold_groups.setdefault(rec["Scaffold_SMILES"] or "(no ring scaffold)", []).append(rec["Compound_ID"])
+    with st.expander("Detected scaffold families", expanded=True):
+        for scaffold, members in sorted(scaffold_groups.items(), key=lambda item: -len(item[1])):
+            st.code(scaffold, language=None)
+            st.caption(f"{len(members)} compound(s): {', '.join(members[:20])}")
+    st.warning("Murcko scaffold grouping does not reconstruct compounds from Markush R-group tables. Unresolved entries are excluded from SMI export; check extracted structures against the PDF.")
+    c1, c2 = st.columns(2)
+    c1.download_button("Download candidate CSV", export_candidates_csv(auto_rows), "panChem_auto_compounds.csv",
+                       "text/csv", use_container_width=True)
+    c2.download_button("Download valid SMI", export_candidates_smi(auto_rows), "panChem_auto_compounds.smi",
+                       "text/plain", use_container_width=True, disabled=not valid_auto)
+st.divider()
+st.subheader("Manual completion — only when needed")
+with st.expander("2. Inspect source PDF", expanded=True):
     upload = st.file_uploader("Upload paper or supplementary PDF", type=["pdf"], key="pc_scaffold_pdf")
     if upload:
         data = upload.getvalue()
@@ -37,7 +77,7 @@ with st.expander("1. Inspect source PDF", expanded=True):
     else:
         st.info("Upload a PDF to inspect structures. You can also build structures without uploading a file.")
 
-st.subheader("2. Scaffolds")
+st.subheader("3. Scaffolds")
 st.caption("Place numbered attachment atoms at substitution sites, e.g. [*:1], [*:2], [*:3].")
 if "pc_scaffold_templates" not in st.session_state:
     st.session_state.pc_scaffold_templates = pd.DataFrame([
@@ -53,11 +93,11 @@ if "pc_scaffold_compounds" not in st.session_state:
          "Source": "", "Page": ""}])
 templates = st.data_editor(st.session_state.pc_scaffold_templates, num_rows="dynamic",
                            width="stretch", key="pc_templates_editor")
-st.subheader("3. Fragment library")
+st.subheader("4. Fragment library")
 st.caption("Each fragment SMILES starts at its attachment atom. Example: para-hydroxyphenyl is c1ccc(O)cc1.")
 fragments = st.data_editor(st.session_state.pc_scaffold_fragments, num_rows="dynamic",
                            width="stretch", key="pc_fragments_editor")
-st.subheader("4. Compound assignments")
+st.subheader("5. Compound assignments")
 st.caption("Fill R1–R3 by fragment name or SMILES. Add source and page for traceability.")
 compounds = st.data_editor(st.session_state.pc_scaffold_compounds, num_rows="dynamic",
                            width="stretch", key="pc_compounds_editor")
@@ -83,7 +123,7 @@ if clicked:
 
 if "pc_scaffold_results" in st.session_state:
     st.divider()
-    st.subheader("5. Review and export")
+    st.subheader("6. Review and export")
     rows = st.session_state.pc_scaffold_results
     molecules = st.session_state.pc_scaffold_molecules
     if not rows:
