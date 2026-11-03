@@ -215,3 +215,56 @@ def export_constructed_smi(rows):
         f"{r['SMILES']}\t{r['Compound_ID']}\n"
         for r in rows if r.get("Status") == "CONSTRUCTED_CANDIDATE" and r.get("SMILES")
     ).encode("utf-8")
+
+
+def extract_tables_from_pdf(pdf_bytes, focus_pages=None, max_ocr_pages=8):
+    """Read text tables and optionally OCR image-backed tables locally.
+
+    Does not use cloud APIs. OCR is restricted to selected/focus pages, and
+    an image-only table that fails parsing stays unresolved. A row is
+    never fabricated from a chemical drawing alone.
+    """
+    text = page_text(pdf_bytes)
+    rows = extract_tables(text)
+    if not focus_pages:
+        focus_pages = list(text)
+    focus = set()
+    for n in focus_pages:
+        for page_number in (n - 1, n, n + 1):
+            if page_number in text:
+                focus.add(page_number)
+    pending = [p for p in sorted(focus) if not any(r["Page"] == p for r in rows)]
+    pending = pending[:max(0, max_ocr_pages)]
+    if not pending:
+        return rows, {"pages": len(text), "ocr_pages": [], "ocr_available": True}
+    try:
+        import pytesseract
+        import pypdfium2 as pdfium
+        import shutil
+        if not shutil.which("tesseract"):
+            return rows, {"pages":len(text),"ocr_pages":[],"ocr_available":False}
+    except ImportError:
+        return rows, {"pages":len(text),"ocr_pages":[],"ocr_available":False}
+    doc = pdfium.PdfDocument(pdf_bytes)
+    scanned = []
+    try:
+        for page_number in pending:
+            page = doc[page_number - 1]
+            try:
+                image = page.render(scale=2.5).to_pil().convert("RGB")
+                ocr_text = pytesseract.image_to_string(
+                    image, config="--psm 6", timeout=40
+                )
+            except Exception:
+                continue
+            scanned.append(page_number)
+            rows.extend(extract_tables({page_number: ocr_text}))
+    finally:
+        doc.close()
+    unique = {}
+    for row in rows:
+        key = (row["Page"], row["Compound_ID"], tuple(sorted(row["R_groups"].items())))
+        unique.setdefault(key,row)
+    return list(unique.values()), {
+        "pages":len(text), "ocr_pages":scanned, "ocr_available":True
+    }
