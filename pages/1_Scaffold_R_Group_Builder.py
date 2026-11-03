@@ -1,5 +1,4 @@
 """panChem literature compound-series builder; complements DECIMER extraction."""
-import io
 
 import pandas as pd
 import pypdfium2 as pdfium
@@ -8,25 +7,19 @@ import streamlit as st
 from chemqa import molecule_svg
 from pdf_viewer import full_page_viewer
 from scaffold_builder import build_records, export_csv, export_sdf, export_smi
-from auto_compounds import candidate_rows, read_decimer_zip, read_decimer_csv, export_candidates_csv, export_candidates_smi
+from auto_compounds import candidate_rows, export_candidates_csv, export_candidates_smi
 
 st.set_page_config(page_title="panChem | Scaffold builder", page_icon="🧪", layout="wide")
 st.title("🧪 panChem")
 st.caption("Extract and curate chemical structures from research PDFs.")
 st.subheader("Scaffold + R-group builder")
-st.caption("Use the same source-document review workflow as panChem DECIMER, with manual scaffold definitions and batch R-group assembly.")
+st.caption("Connected to panChem DECIMER results in this session. No separate results upload required.")
 
 st.subheader("1. Auto-extract compounds from DECIMER")
-st.caption("Use the latest panChem extraction automatically, or import a DECIMER results ZIP/CSV. Complete SMILES are grouped by RDKit Murcko scaffold; unresolved Markush labels are held for review.")
+st.caption("DECIMER results are shared directly from the main panChem page. Completed structures are grouped by scaffold; ambiguous drawings remain for review.")
 extracted = st.session_state.get("panchem_builder_source_rows", [])
-source_file = st.file_uploader("Or import DECIMER results (.zip or .csv)", type=["zip", "csv"], key="pc_auto_source")
-if source_file:
-    try:
-        extracted = (read_decimer_zip(source_file.getvalue()) if source_file.name.lower().endswith(".zip")
-                     else read_decimer_csv(source_file.getvalue()))
-    except Exception as exc:
-        st.error(f"Cannot read DECIMER results: {exc}")
-        extracted = []
+if not extracted:
+    st.info("Run DECIMER from the main panChem page. When the extraction finishes, compound analysis appears automatically there and here, with no second upload.")
 if extracted:
     st.caption(f"{len(extracted)} source records available.")
     import hashlib
@@ -61,27 +54,20 @@ if "pc_auto_results" in st.session_state:
                        "text/plain", use_container_width=True, disabled=not valid_auto)
 st.divider()
 st.subheader("Manual completion — only when needed")
-with st.expander("2. Inspect source PDF", expanded=True):
-    upload = st.file_uploader("Upload paper or supplementary PDF", type=["pdf"], key="pc_scaffold_pdf")
-    if upload:
-        data = upload.getvalue()
-        if len(data) > 25 * 1024 * 1024:
-            st.error("Maximum PDF size is 25 MB.")
-        else:
+with st.expander("2. Original source PDF", expanded=False):
+    data = st.session_state.get("panchem_source_pdf")
+    if data:
+        try:
+            doc = pdfium.PdfDocument(data)
             try:
-                doc = pdfium.PdfDocument(data)
-                try:
-                    n_pages = len(doc)
-                    if n_pages < 1:
-                        raise ValueError("PDF contains no pages.")
-                    st.caption(f"{n_pages} page(s). This viewer does not send the file to GitHub.")
-                    st.components.v1.html(full_page_viewer(data), height=760, scrolling=False)
-                finally:
-                    doc.close()
-            except Exception as exc:
-                st.error(f"Could not preview PDF: {exc}")
+                st.caption(f"{len(doc)} page(s). PDF is reused from the main panChem upload.")
+                st.components.v1.html(full_page_viewer(data), height=760, scrolling=False)
+            finally:
+                doc.close()
+        except Exception as exc:
+            st.error(f"Could not preview PDF: {exc}")
     else:
-        st.info("Upload a PDF to inspect structures. You can also build structures without uploading a file.")
+        st.info("The PDF is available here when the original extraction was started in the current session.")
 
 st.subheader("3. Scaffolds")
 st.caption("Place numbered attachment atoms at substitution sites, e.g. [*:1], [*:2], [*:3].")
