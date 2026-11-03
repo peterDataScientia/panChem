@@ -309,6 +309,16 @@ if artifact_id:
                             value=rec.get("smiles", ""),
                             key=edit_key,
                         )
+                        verify_key = f"source-verified-{artifact_id}-{index}"
+                        # An edit invalidates any earlier verification, because
+                        # it changes the molecule being compared to the drawing.
+                        verify_smiles_key = f"{verify_key}-smiles"
+                        if st.session_state.get(verify_smiles_key) != value:
+                            st.session_state[verify_key] = False
+                            st.session_state[verify_smiles_key] = value
+                        st.checkbox("I verified this structure against the PDF drawing",
+                                    key=verify_key,
+                                    help="RDKit syntax validity alone is not enough for final SMILES export.")
                         state[str(index)] = value
                         qa_status, canonical, inchikey, mol = assess(value)
                         st.caption({
@@ -342,6 +352,7 @@ if artifact_id:
                     inchikey=inchikey,
                     qa_status=qa_status,
                     source_run_id=run_id,
+                    verified_against_pdf=bool(st.session_state.get(f"source-verified-{artifact_id}-{index}", False)),
                 )
                 reviewed.append(rec)
             if reviewed:
@@ -357,8 +368,8 @@ if artifact_id:
                 valid_candidates = [r for r in auto_rows if r["Status"] == "VALID_SYNTAX"]
                 c1, c2, c3 = st.columns(3)
                 c1.metric("Structures analyzed", len(auto_rows))
-                c2.metric("Valid candidate SMILES", len(valid_candidates))
-                c3.metric("Need chemical review", len(auto_rows) - len(valid_candidates))
+                c2.metric("Syntax-valid candidates", len(valid_candidates))
+                c3.metric("Not source-verified", sum(r.get("Image_verified") != "YES" for r in auto_rows))
                 with st.expander("Compound and scaffold families", expanded=True):
                     st.dataframe(pd.DataFrame(auto_rows), hide_index=True, use_container_width=True)
                     grouped = {}
@@ -367,13 +378,14 @@ if artifact_id:
                     for scaffold, members in sorted(grouped.items(), key=lambda item: -len(item[1])):
                         st.code(scaffold, language=None)
                         st.caption(f"{len(members)} structures")
-                    st.caption("Murcko grouping requires fully specified structures. Markush R-groups still require chemical review.")
+                    st.caption("Murcko grouping requires fully specified structures. Only image-verified SMILES are exported. Markush R-groups require review.")
                     ca, cb = st.columns(2)
                     ca.download_button("Download compound CSV", export_candidates_csv(auto_rows),
                                        f"panChem_compounds_{run_id}.csv", "text/csv", key=f"auto-csv-{artifact_id}")
                     cb.download_button("Download valid SMI", export_candidates_smi(auto_rows),
                                        f"panChem_compounds_{run_id}.smi", "text/plain",
-                                       disabled=not valid_candidates, key=f"auto-smi-{artifact_id}")
+                                       disabled=not any(r.get("Image_verified") == "YES" for r in auto_rows),
+                                       key=f"auto-smi-{artifact_id}")
                 if st.button("Open advanced scaffold assembly", key=f"auto-builder-{artifact_id}"):
                     st.switch_page("pages/1_Scaffold_R_Group_Builder.py")
                 counts = {}
