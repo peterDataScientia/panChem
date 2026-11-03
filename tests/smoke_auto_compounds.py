@@ -33,4 +33,16 @@ with zipfile.ZipFile(zip_bytes, "w") as z:
 assert len(read_decimer_zip(zip_bytes.getvalue())) == 4
 rejected = candidate_rows([{"smiles": "CCO", "reviewed_smiles": "", "page": "2", "structure": "1"}])
 assert rejected[0]["Status"] == "MISSING_SMILES", "Rejected recognition must not reappear"
+# Regression inputs based on observed panChem page-4 DECIMER output.
+# Disconnected components and attachment-like radicals must not be exported.
+problematic = candidate_rows([
+    {"page": "4", "structure": "3",
+     "smiles": "[CH]C1=C2C=CNC2=NC=C1.[CH]C1=C2C=CNC2=NC=C1"},
+    {"page": "4", "structure": "6",
+     "smiles": "CC1=C2C(=CNC2=NC=C1)C.CC1=CC=NC=C1"},
+    {"page": "4", "structure": "1",
+     "smiles": "C1=CC=C(C=C1)N2CCC3=C(C=C(C=C3)[R1])CC2=O"},
+])
+assert all(row["Status"] != "VALID_SYNTAX" for row in problematic)
+assert export_candidates_smi(problematic) == b""
 print("DECIMER CSV/ZIP, scaffold grouping, ambiguous entry exclusion, export: PASS")
