@@ -19,7 +19,7 @@ def candidate_rows(extracted):
     """Normalize DECIMER/QA rows without silently accepting ambiguous structures."""
     output = []
     for i, record in enumerate(extracted, start=1):
-        raw = str(record.get("reviewed_smiles") or record.get("smiles") or "").strip()
+        raw = str(record["reviewed_smiles"] if "reviewed_smiles" in record else record.get("smiles") or "").strip()
         status, canonical, key, mol = assess(raw)
         if mol is not None and any(atom.GetAtomicNum() == 0 for atom in mol.GetAtoms()):
             status, canonical, key, mol = "MARKUSH_REVIEW", "", "", None
