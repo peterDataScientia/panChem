@@ -29,7 +29,13 @@ if source_file:
         extracted = []
 if extracted:
     st.caption(f"{len(extracted)} source records available.")
-    if st.button("Generate compound set automatically", type="primary", key="pc_auto_run"):
+    import hashlib
+    import json
+    digest = hashlib.sha256(json.dumps(extracted, sort_keys=True, default=str).encode()).hexdigest()
+    if st.session_state.get("pc_auto_source_digest") != digest:
+        st.session_state.pc_auto_results = candidate_rows(extracted)
+        st.session_state.pc_auto_source_digest = digest
+    if st.button("Refresh automatic compound analysis", key="pc_auto_run"):
         st.session_state.pc_auto_results = candidate_rows(extracted)
 if "pc_auto_results" in st.session_state:
     auto_rows = st.session_state.pc_auto_results
