@@ -23,8 +23,19 @@ def candidate_rows(extracted):
         status, canonical, key, mol = assess(raw)
         if mol is not None and any(atom.GetAtomicNum() == 0 for atom in mol.GetAtoms()):
             status, canonical, key, mol = "MARKUSH_REVIEW", "", "", None
-        scaffold = ""
+        # Keep the existing DECIMER schema unchanged, but block suspicious
+        # representations from downstream SMI export. Disconnected fragments
+        # and radicals often arise when attachment labels are misrecognized.
+        warning = ""
         if mol is not None:
+            if len(Chem.GetMolFrags(mol)) > 1:
+                status = "STRUCTURE_REVIEW"
+                warning = "Disconnected components: verify whether these are separate drawings or one compound."
+            elif any(atom.GetNumRadicalElectrons() for atom in mol.GetAtoms()):
+                status = "STRUCTURE_REVIEW"
+                warning = "Radical atom detected: verify the source drawing and attachment markers."
+        scaffold = ""
+        if mol is not None and status == "VALID_SYNTAX":
             try:
                 scaf = MurckoScaffold.GetScaffoldForMol(mol)
                 scaffold = Chem.MolToSmiles(scaf, isomericSmiles=True) if scaf.GetNumAtoms() else ""
@@ -37,7 +48,8 @@ def candidate_rows(extracted):
             "Original_SMILES": raw, "SMILES": canonical,
             "InChIKey": key, "Scaffold_SMILES": scaffold,
             "Status": status,
-            "Review": "Check source figure and table before publication" if status == "VALID_SYNTAX" else "Manual identification required",
+            "Review": (warning or ("Check source figure and table before publication"
+                            if status == "VALID_SYNTAX" else "Manual identification required")),
             "Source": str(record.get("Source") or ""),
         })
     return output
