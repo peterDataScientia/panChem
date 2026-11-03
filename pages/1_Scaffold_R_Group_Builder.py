@@ -1,142 +1,118 @@
-"""PDF-to-SMILES structure curation page for PanDoc.
-
-Scaffold and R-group transcription is human-reviewed. This tool does not
-interpret chemical drawings automatically or verify assignments against a paper.
-Independent implementation inspired by the workflow in nyelidl/pdf2smi.
-"""
+"""panChem literature compound-series builder; complements DECIMER extraction."""
 import io
-import pypdfium2 as pdfium
 
 import pandas as pd
+import pypdfium2 as pdfium
 import streamlit as st
-from rdkit import Chem
-from rdkit.Chem import Descriptors, Draw, rdMolDescriptors
 
-st.set_page_config(page_title="panChem · Scaffold Builder", page_icon="🧪", layout="wide")
-st.title("Scaffold + R-group Builder")
-st.caption("Build literature compound series from reviewed scaffold and substituent definitions. Complements panChem DECIMER extraction.")
+from chemqa import molecule_svg
+from pdf_viewer import full_page_viewer
+from scaffold_builder import build_records, export_csv, export_sdf, export_smi
 
-with st.expander("1 · Inspect source PDF", expanded=True):
-    upload = st.file_uploader("Paper or supplementary PDF", type=["pdf"], key="pdf2smi_upload")
+st.set_page_config(page_title="panChem | Scaffold builder", page_icon="🧪", layout="wide")
+st.title("🧪 panChem")
+st.caption("Extract and curate chemical structures from research PDFs.")
+st.subheader("Scaffold + R-group builder")
+st.caption("Use the same source-document review workflow as panChem DECIMER, with manual scaffold definitions and batch R-group assembly.")
+
+with st.expander("1. Inspect source PDF", expanded=True):
+    upload = st.file_uploader("Upload paper or supplementary PDF", type=["pdf"], key="pc_scaffold_pdf")
     if upload:
-        try:
-            data = upload.getvalue()
-            doc = pdfium.PdfDocument(data)
+        data = upload.getvalue()
+        if len(data) > 25 * 1024 * 1024:
+            st.error("Maximum PDF size is 25 MB.")
+        else:
             try:
-                number = st.number_input("Page", min_value=1, max_value=len(doc), value=1, step=1)
-                page = doc[int(number) - 1]
-                image = page.render(scale=2.0).to_pil().convert("RGB")
-                st.image(image, caption=f"Page {number}", width="stretch")
-                st.caption("PDF preview only. Compare the assembled molecules visually with the publication.")
-            finally:
-                doc.close()
-        except Exception as exc:
-            st.error(f"PDF could not be opened: {exc}")
-
-st.subheader("2 · Define scaffolds and fragments")
-st.caption("Scaffold uses numbered dummy atoms, e.g. [*:1] and [*:2]. Fragment SMILES must start with the atom that attaches to that position.")
-templates = st.data_editor(
-    pd.DataFrame([{"Template": "example", "Scaffold_SMILES": "Cc1nc([*:1])[nH]c1[*:2]"}]),
-    num_rows="dynamic", width="stretch", key="pdfsmi_templates")
-fragments = st.data_editor(
-    pd.DataFrame([{"Name": "phenyl", "SMILES": "c1ccccc1"},
-                  {"Name": "4-hydroxyphenyl", "SMILES": "c1ccc(O)cc1"}]),
-    num_rows="dynamic", width="stretch", key="pdfsmi_fragments")
-st.subheader("3 · Compound assignments")
-st.caption("Slots 1–3 correspond to [*:1]–[*:3]. Entries can be fragment names or attachment-first SMILES. Provide a traceable source/page for every compound.")
-compounds = st.data_editor(
-    pd.DataFrame([{"Compound_ID": "Example-1", "Template": "example",
-                   "R1": "phenyl", "R2": "4-hydroxyphenyl", "R3": "",
-                   "Source": "", "Page": ""}]),
-    num_rows="dynamic", width="stretch", key="pdfsmi_compounds")
-
-
-def assemble(scaffold_text, assignments):
-    scaffold = Chem.MolFromSmiles(scaffold_text)
-    if scaffold is None:
-        raise ValueError("Invalid scaffold SMILES")
-    slot_counts = {}
-    for atom in scaffold.GetAtoms():
-        if atom.GetAtomicNum() == 0:
-            key = atom.GetAtomMapNum()
-            if key < 1:
-                raise ValueError("Scaffold has unnumbered attachment atoms")
-            slot_counts[key] = slot_counts.get(key, 0) + 1
-    if not slot_counts or any(count != 1 for count in slot_counts.values()):
-        raise ValueError("Each attachment number must appear exactly once")
-    if set(assignments) != set(slot_counts):
-        raise ValueError(f"Required slots: {sorted(slot_counts)}; supplied: {sorted(assignments)}")
-    combined = scaffold
-    for slot, fragment in assignments.items():
-        frag = Chem.MolFromSmiles(f"[*:{slot}]{fragment}")
-        if frag is None:
-            raise ValueError(f"Invalid fragment at slot {slot}")
-        combined = Chem.CombineMols(combined, frag)
-    mol = Chem.molzip(combined)
-    Chem.SanitizeMol(mol)
-    if any(a.GetAtomicNum() == 0 for a in mol.GetAtoms()):
-        raise ValueError("Unresolved dummy attachment point")
-    return mol
-
-
-if st.button("Build and validate structures", type="primary"):
-    template_dict = {}
-    fragment_dict = {}
-    for _, row in templates.fillna("").iterrows():
-        name = str(row["Template"]).strip()
-        if name:
-            template_dict[name] = str(row["Scaffold_SMILES"]).strip()
-    for _, row in fragments.fillna("").iterrows():
-        name = str(row["Name"]).strip()
-        if name:
-            fragment_dict[name] = str(row["SMILES"]).strip()
-    rows, molecules, legends = [], [], []
-    for _, record in compounds.fillna("").iterrows():
-        cid = str(record["Compound_ID"]).strip()
-        if not cid:
-            continue
-        entry = {"Compound_ID": cid, "Template": str(record["Template"]).strip(),
-                 "Source": str(record["Source"]).strip(), "Page": str(record["Page"]).strip()}
-        try:
-            if entry["Template"] not in template_dict:
-                raise ValueError("Unknown scaffold template")
-            vals = {}
-            for slot in (1, 2, 3):
-                raw = str(record[f"R{slot}"]).strip()
-                if raw:
-                    vals[slot] = fragment_dict.get(raw, raw)
-            mol = assemble(template_dict[entry["Template"]], vals)
-            entry.update(SMILES=Chem.MolToSmiles(mol, isomericSmiles=True),
-                         Formula=rdMolDescriptors.CalcMolFormula(mol),
-                         MW=round(Descriptors.MolWt(mol), 2), Status="OK", Error="")
-            molecules.append(mol)
-            legends.append(cid)
-        except Exception as exc:
-            entry.update(SMILES="", Formula="", MW="", Status="FAILED", Error=str(exc))
-        rows.append(entry)
-    st.session_state.pdfsmi_results = pd.DataFrame(rows)
-    st.session_state.pdfsmi_mols = molecules
-    st.session_state.pdfsmi_legends = legends
-
-if "pdfsmi_results" in st.session_state:
-    result = st.session_state.pdfsmi_results
-    st.subheader("4 · Review and export")
-    if result.empty:
-        st.warning("No compound identifiers were entered.")
+                doc = pdfium.PdfDocument(data)
+                try:
+                    n_pages = len(doc)
+                    if n_pages < 1:
+                        raise ValueError("PDF contains no pages.")
+                    st.caption(f"{n_pages} page(s). This viewer does not send the file to GitHub.")
+                    st.components.v1.html(full_page_viewer(data), height=760, scrolling=False)
+                finally:
+                    doc.close()
+            except Exception as exc:
+                st.error(f"Could not preview PDF: {exc}")
     else:
+        st.info("Upload a PDF to inspect structures. You can also build structures without uploading a file.")
+
+st.subheader("2. Scaffolds")
+st.caption("Place numbered attachment atoms at substitution sites, e.g. [*:1], [*:2], [*:3].")
+if "pc_scaffold_templates" not in st.session_state:
+    st.session_state.pc_scaffold_templates = pd.DataFrame([
+        {"Template": "example", "Scaffold_SMILES": "Cc1nc([*:1])[nH]c1[*:2]"}])
+if "pc_scaffold_fragments" not in st.session_state:
+    st.session_state.pc_scaffold_fragments = pd.DataFrame([
+        {"Name": "phenyl", "SMILES": "c1ccccc1"},
+        {"Name": "4-hydroxyphenyl", "SMILES": "c1ccc(O)cc1"}])
+if "pc_scaffold_compounds" not in st.session_state:
+    st.session_state.pc_scaffold_compounds = pd.DataFrame([
+        {"Compound_ID": "Example-1", "Template": "example",
+         "R1": "phenyl", "R2": "4-hydroxyphenyl", "R3": "",
+         "Source": "", "Page": ""}])
+templates = st.data_editor(st.session_state.pc_scaffold_templates, num_rows="dynamic",
+                           width="stretch", key="pc_templates_editor")
+st.subheader("3. Fragment library")
+st.caption("Each fragment SMILES starts at its attachment atom. Example: para-hydroxyphenyl is c1ccc(O)cc1.")
+fragments = st.data_editor(st.session_state.pc_scaffold_fragments, num_rows="dynamic",
+                           width="stretch", key="pc_fragments_editor")
+st.subheader("4. Compound assignments")
+st.caption("Fill R1–R3 by fragment name or SMILES. Add source and page for traceability.")
+compounds = st.data_editor(st.session_state.pc_scaffold_compounds, num_rows="dynamic",
+                           width="stretch", key="pc_compounds_editor")
+run, reset = st.columns([2, 1])
+clicked = run.button("Build and validate structures", type="primary", use_container_width=True)
+if reset.button("Clear results", use_container_width=True):
+    st.session_state.pop("pc_scaffold_results", None)
+    st.session_state.pop("pc_scaffold_molecules", None)
+    st.rerun()
+if clicked:
+    names = [str(r.get("Template") or "").strip() for r in templates.fillna("").to_dict("records") if str(r.get("Template") or "").strip()]
+    fragment_names = [str(r.get("Name") or "").strip() for r in fragments.fillna("").to_dict("records") if str(r.get("Name") or "").strip()]
+    if len(names) != len(set(names)) or len(fragment_names) != len(set(fragment_names)):
+        st.error("Scaffold and fragment names must be unique.")
+    else:
+        templates_map = {str(r["Template"]).strip(): str(r["Scaffold_SMILES"]).strip()
+                         for r in templates.fillna("").to_dict("records") if str(r["Template"]).strip()}
+        library_map = {str(r["Name"]).strip(): str(r["SMILES"]).strip()
+                       for r in fragments.fillna("").to_dict("records") if str(r["Name"]).strip()}
+        rows, molecules = build_records(compounds.fillna("").to_dict("records"), templates_map, library_map)
+        st.session_state.pc_scaffold_results = rows
+        st.session_state.pc_scaffold_molecules = molecules
+
+if "pc_scaffold_results" in st.session_state:
+    st.divider()
+    st.subheader("5. Review and export")
+    rows = st.session_state.pc_scaffold_results
+    molecules = st.session_state.pc_scaffold_molecules
+    if not rows:
+        st.warning("No compound identifiers supplied.")
+    else:
+        valid = sum(r["Status"] == "VALID_SYNTAX" for r in rows)
         a, b, c = st.columns(3)
-        a.metric("Total", len(result))
-        b.metric("RDKit valid", int((result.Status == "OK").sum()))
-        c.metric("Failed", int((result.Status == "FAILED").sum()))
-        st.dataframe(result, width="stretch", hide_index=True)
-        mols = st.session_state.pdfsmi_mols
-        if mols:
-            st.image(Draw.MolsToGridImage(mols, legends=st.session_state.pdfsmi_legends,
-                                         molsPerRow=4, subImgSize=(240, 210)))
-        st.warning("RDKit validation checks chemical syntax and valence, not whether the structure, attachment position, stereochemistry, or activity matches the publication.")
-        st.download_button("Download CSV", result.to_csv(index=False).encode(),
-                           "pandoc_literature_smiles.csv", "text/csv", on_click="ignore")
-        valid = result.loc[result.Status == "OK"]
-        smi = "".join(f"{row.SMILES}\t{row.Compound_ID}\n" for row in valid.itertuples())
-        st.download_button("Download SMI", smi.encode(), "pandoc_literature_smiles.smi",
-                           "text/plain", on_click="ignore")
+        a.metric("Compounds", len(rows))
+        b.metric("SMILES valid", valid)
+        c.metric("Failed", len(rows) - valid)
+        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+        if molecules:
+            st.markdown("**Molecular structure review**")
+            for start in range(0, len(molecules), 3):
+                columns = st.columns(3)
+                for col, (cid, mol) in zip(columns, molecules[start:start+3]):
+                    with col:
+                        st.caption(cid)
+                        svg = molecule_svg(mol)
+                        if svg:
+                            st.image(svg, use_container_width=True)
+                        else:
+                            st.warning("2D preview unavailable.")
+        st.warning("RDKit validates structure syntax and valence, not correspondence with the published drawing, attachment positions or stereochemistry. Verify against the PDF.")
+        left, mid, right = st.columns(3)
+        left.download_button("Download CSV", export_csv(rows), "panChem_scaffold_compounds.csv",
+                             "text/csv", use_container_width=True)
+        mid.download_button("Download SMI", export_smi(rows), "panChem_scaffold_compounds.smi",
+                            "text/plain", use_container_width=True, disabled=not valid)
+        right.download_button("Download SDF", export_sdf(molecules) if molecules else b"",
+                              "panChem_scaffold_compounds.sdf", "chemical/x-mdl-sdfile",
+                              use_container_width=True, disabled=not valid)
