@@ -420,6 +420,39 @@ if artifact_id:
                 else:
                     table_rows = []
                 st.caption(f"{len(scaffolds)} usable labelled scaffold(s) · {len(table_rows)} R-group table row(s) found")
+                # OCR is fallible. Let the researcher repair extracted rows
+                # in-place; no duplicate source upload or separate builder.
+                if scaffolds:
+                    editable_rows = []
+                    for item in table_rows:
+                        editable_rows.append({
+                            "Compound_ID": item["Compound_ID"],
+                            "Page": item.get("Page", ""),
+                            "R1": item.get("R_groups", {}).get(1, ""),
+                            "R2": item.get("R_groups", {}).get(2, ""),
+                            "R3": item.get("R_groups", {}).get(3, ""),
+                        })
+                    with st.expander("Review or correct the extracted R-group table",
+                                     expanded=not bool(table_rows)):
+                        st.caption("Auto-detected values appear below. Correct only missed or ambiguous R-group cells. Enter H explicitly for an unsubstituted site.")
+                        edited_frame = st.data_editor(
+                            pd.DataFrame(editable_rows, columns=["Compound_ID", "Page", "R1", "R2", "R3"]),
+                            num_rows="dynamic", hide_index=True, width="stretch",
+                            key=f"markush-table-editor-{artifact_id}",
+                        )
+                        corrected = []
+                        for rec in edited_frame.fillna("").to_dict("records"):
+                            cid = str(rec.get("Compound_ID", "")).strip()
+                            if not cid:
+                                continue
+                            groups = {slot: str(rec.get(f"R{slot}", "")).strip()
+                                      for slot in (1, 2, 3)
+                                      if str(rec.get(f"R{slot}", "")).strip()}
+                            corrected.append({
+                                "Compound_ID": cid, "Page": rec.get("Page", ""),
+                                "R_groups": groups,
+                            })
+                        table_rows = corrected
                 if len(scaffolds) == 1 and table_rows:
                     chosen = scaffolds[0]
                     st.caption(f"Using unique scaffold: {chosen['label']}")
