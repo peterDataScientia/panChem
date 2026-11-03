@@ -4,3 +4,5 @@ pypdfium2>=4.30,<6
 Pillow>=10,<11
 
 rdkit>=2024.9,<2027
+# Local OCR fallback for image-only SAR tables (no paid API)
+pytesseract>=0.3.13,<1
