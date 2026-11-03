@@ -34,5 +34,7 @@ assert b"2a" in export_csv(rows)
 assert export_smi(rows).count(b"\n") == 1
 sdf = export_sdf(molecules).decode()
 assert "$$$$" in sdf and "2a" in sdf
-supplier = Chem.SDMolSupplier()\nsupplier.SetData(sdf, removeHs=True)\nassert len([m for m in supplier if m is not None]) == 1
+supplier = Chem.SDMolSupplier()
+supplier.SetData(sdf, removeHs=True)
+assert len([m for m in supplier if m is not None]) == 1
 print("Scaffold assembly, source metadata, failures and CSV/SMI/SDF exports: PASS")
