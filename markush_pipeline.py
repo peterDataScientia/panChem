@@ -186,3 +186,32 @@ def build_from_table(scaffold, rows, scaffold_id=""):
             entry["Reason"]=str(exc)
         results.append(entry)
     return results
+
+
+def export_constructed_sdf(rows):
+    """Export chemically constructible candidates with explicit review metadata."""
+    from rdkit.Chem import rdDepictor
+    import io
+    stream = io.StringIO()
+    writer = Chem.SDWriter(stream)
+    for row in rows:
+        if row.get("Status") != "CONSTRUCTED_CANDIDATE":
+            continue
+        mol = Chem.MolFromSmiles(row.get("SMILES", ""))
+        if mol is None:
+            continue
+        mol.SetProp("_Name", str(row.get("Compound_ID", "")))
+        mol.SetProp("Validation_Status", "CONSTRUCTED_CANDIDATE_NOT_SOURCE_VERIFIED")
+        mol.SetProp("Source_Page", str(row.get("Page", "")))
+        mol.SetProp("Scaffold_ID", str(row.get("Scaffold_ID", "")))
+        rdDepictor.Compute2DCoords(mol)
+        writer.write(mol)
+    writer.close()
+    return stream.getvalue().encode("utf-8")
+
+
+def export_constructed_smi(rows):
+    return "".join(
+        f"{r['SMILES']}\t{r['Compound_ID']}\n"
+        for r in rows if r.get("Status") == "CONSTRUCTED_CANDIDATE" and r.get("SMILES")
+    ).encode("utf-8")
