@@ -16,7 +16,7 @@ import streamlit.components.v1 as components
 from PIL import Image
 from chemqa import assess, molecule_svg, rows_from_artifact, make_review_zip
 from auto_compounds import candidate_rows, export_candidates_csv, export_candidates_smi
-from markush_pipeline import normalize_scaffold, page_text, extract_tables, build_from_table
+from markush_pipeline import normalize_scaffold, page_text, extract_tables, build_from_table, export_constructed_sdf, export_constructed_smi
 from pdf_viewer import full_page_viewer
 from time_utils import format_eat
 from performance_diagnostics import performance_from_artifact, github_timing_report
@@ -441,10 +441,17 @@ if artifact_id:
                                     if drawing:
                                         st.image(drawing, use_container_width=True)
                     st.caption("Constructed molecules are candidates until the scaffold, table row, attachment position and original drawing are checked.")
-                    st.download_button("Download constructed-compounds review CSV",
-                                       pd.DataFrame(assembled).to_csv(index=False).encode("utf-8"),
-                                       f"panChem_markush_{run_id}.csv", "text/csv",
-                                       key=f"markush-export-{artifact_id}")
+                    out1, out2, out3 = st.columns(3)
+                    out1.download_button("Download candidate CSV",
+                                         pd.DataFrame(assembled).to_csv(index=False).encode("utf-8"),
+                                         f"panChem_markush_{run_id}.csv", "text/csv",
+                                         key=f"markush-export-{artifact_id}")
+                    out2.download_button("Download candidate SMI", export_constructed_smi(assembled),
+                                         f"panChem_markush_{run_id}.smi", "text/plain",
+                                         disabled=not completed, key=f"markush-smi-{artifact_id}")
+                    out3.download_button("Download candidate SDF", export_constructed_sdf(assembled),
+                                         f"panChem_markush_{run_id}.sdf", "chemical/x-mdl-sdfile",
+                                         disabled=not completed, key=f"markush-sdf-{artifact_id}")
                 if st.button("Open advanced scaffold assembly", key=f"auto-builder-{artifact_id}"):
                     st.switch_page("pages/1_Scaffold_R_Group_Builder.py")
                 counts = {}
