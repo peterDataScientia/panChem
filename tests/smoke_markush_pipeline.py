@@ -2,6 +2,7 @@
 from rdkit import Chem
 from markush_pipeline import (
     normalize_scaffold, resolve_group, complete, extract_tables, build_from_table,
+    page_text, extract_tables_from_pdf,
     export_constructed_smi, export_constructed_sdf,
 )
 
@@ -38,4 +39,37 @@ refused = build_from_table(scaffold, [
 ])
 assert all(r["Status"] == "NEEDS_REVIEW" for r in refused)
 assert resolve_group("4-Cl-Ph") == "c1ccc(Cl)cc1"
+
+# Minimal, self-contained text-layer PDF: verifies the real pdfium parser,
+# rather than testing only a synthetic Python string.
+def simple_pdf():
+    objects = []
+    payload = (b"BT /F1 12 Tf 60 750 Td (Compound   R1   IC50) Tj "
+               b"0 -20 Td (8a   Cl   0.8) Tj "
+               b"0 -20 Td (8b   F   1.1) Tj ET")
+    objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
+    objects.append(b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>")
+    objects.append(b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+                   b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>")
+    objects.append(b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>")
+    objects.append(b"<< /Length " + str(len(payload)).encode() + b" >>\nstream\n"
+                   + payload + b"\nendstream")
+    pdf = b"%PDF-1.4\n"
+    offsets = []
+    for index, body in enumerate(objects, 1):
+        offsets.append(len(pdf))
+        pdf += str(index).encode() + b" 0 obj\n" + body + b"\nendobj\n"
+    ref = len(pdf)
+    pdf += b"xref\n0 6\n0000000000 65535 f \n"
+    pdf += b"".join(f"{offset:010d} 00000 n \n".encode() for offset in offsets)
+    pdf += (b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n"
+            + str(ref).encode() + b"\n%%EOF")
+    return pdf
+
+pdf_data = simple_pdf()
+assert "Compound" in page_text(pdf_data)[1]
+pdf_rows, meta = extract_tables_from_pdf(pdf_data, focus_pages=[1], max_ocr_pages=0)
+assert len(pdf_rows) == 2 and pdf_rows[0]["R_groups"] == {1: "Cl"}
+assert meta["pages"] == 1
+
 print("Markush normalization, table rows, chemistry assembly, uncertain mapping: PASS")
