@@ -16,6 +16,7 @@ import streamlit.components.v1 as components
 from PIL import Image
 from chemqa import assess, molecule_svg, rows_from_artifact, make_review_zip
 from auto_compounds import candidate_rows, export_candidates_csv, export_candidates_smi
+from markush_pipeline import normalize_scaffold, page_text, extract_tables, build_from_table
 from pdf_viewer import full_page_viewer
 from time_utils import format_eat
 from performance_diagnostics import performance_from_artifact, github_timing_report
@@ -386,6 +387,64 @@ if artifact_id:
                                        f"panChem_compounds_{run_id}.smi", "text/plain",
                                        disabled=not any(r.get("Image_verified") == "YES" for r in auto_rows),
                                        key=f"auto-smi-{artifact_id}")
+                # Reuse the PDF provided for the DECIMER run. No second upload.
+                st.subheader("Markush → completed structures")
+                original_pdf = st.session_state.get("panchem_source_pdf")
+                scaffolds = []
+                for source_row in reviewed:
+                    normalized = normalize_scaffold(source_row.get("reviewed_smiles", ""))
+                    if normalized:
+                        scaffolds.append({
+                            "label": f"Page {source_row.get('page')} · structure {source_row.get('structure')}",
+                            "smiles": normalized,
+                        })
+                if original_pdf:
+                    try:
+                        table_rows = extract_tables(page_text(original_pdf))
+                    except Exception as exc:
+                        table_rows = []
+                        st.warning(f"Cannot extract the R-group table from the PDF text layer: {exc}")
+                else:
+                    table_rows = []
+                st.caption(f"{len(scaffolds)} usable labelled scaffold(s) · {len(table_rows)} R-group table row(s) found")
+                if len(scaffolds) == 1 and table_rows:
+                    chosen = scaffolds[0]
+                    st.caption(f"Using unique scaffold: {chosen['label']}")
+                    assembled = build_from_table(chosen["smiles"], table_rows, chosen["label"])
+                elif len(scaffolds) > 1 and table_rows:
+                    idx = st.selectbox("Select the matching scaffold for this table",
+                                       range(len(scaffolds)),
+                                       format_func=lambda i: scaffolds[i]["label"],
+                                       key=f"markush-scaffold-{artifact_id}")
+                    chosen = scaffolds[idx]
+                    st.code(chosen["smiles"], language=None)
+                    st.caption("Several scaffold drawings were detected. Select the correct one before constructing molecules.")
+                    assembled = build_from_table(chosen["smiles"], table_rows, chosen["label"])
+                else:
+                    assembled = []
+                    if not table_rows and original_pdf:
+                        st.info("No complete R-group table was found in the readable PDF text layer. Image-only tables need a different extraction method or review.")
+                    if not original_pdf:
+                        st.info("The source PDF is not retained in this session. Open a new extraction from the original PDF to link table rows.")
+                if assembled:
+                    completed = [x for x in assembled if x["Status"] == "CONSTRUCTED_CANDIDATE"]
+                    st.dataframe(pd.DataFrame(assembled), hide_index=True, width="stretch")
+                    st.metric("Full molecules constructed (candidates)", len(completed))
+                    if completed:
+                        for start in range(0, min(len(completed), 24), 3):
+                            cols = st.columns(3)
+                            for col, row in zip(cols, completed[start:start + 3]):
+                                with col:
+                                    st.caption(row["Compound_ID"])
+                                    mol = Chem.MolFromSmiles(row["SMILES"])
+                                    drawing = molecule_svg(mol) if mol else None
+                                    if drawing:
+                                        st.image(drawing, use_container_width=True)
+                    st.caption("Constructed molecules are candidates until the scaffold, table row, attachment position and original drawing are checked.")
+                    st.download_button("Download constructed-compounds review CSV",
+                                       pd.DataFrame(assembled).to_csv(index=False).encode("utf-8"),
+                                       f"panChem_markush_{run_id}.csv", "text/csv",
+                                       key=f"markush-export-{artifact_id}")
                 if st.button("Open advanced scaffold assembly", key=f"auto-builder-{artifact_id}"):
                     st.switch_page("pages/1_Scaffold_R_Group_Builder.py")
                 counts = {}
