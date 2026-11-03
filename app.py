@@ -16,7 +16,7 @@ import streamlit.components.v1 as components
 from PIL import Image
 from chemqa import assess, molecule_svg, rows_from_artifact, make_review_zip
 from auto_compounds import candidate_rows, export_candidates_csv, export_candidates_smi
-from markush_pipeline import normalize_scaffold, page_text, extract_tables, build_from_table, export_constructed_sdf, export_constructed_smi
+from markush_pipeline import normalize_scaffold, extract_tables_from_pdf, build_from_table, export_constructed_sdf, export_constructed_smi
 from pdf_viewer import full_page_viewer
 from time_utils import format_eat
 from performance_diagnostics import performance_from_artifact, github_timing_report
@@ -400,7 +400,16 @@ if artifact_id:
                         })
                 if original_pdf:
                     try:
-                        table_rows = extract_tables(page_text(original_pdf))
+                        table_rows, table_diagnostics = extract_tables_from_pdf(
+                            original_pdf,
+                            focus_pages=[int(x.get("page")) for x in reviewed
+                                         if str(x.get("page", "")).isdigit()],
+                        )
+                        ocr_pages = table_diagnostics.get("ocr_pages", [])
+                        if ocr_pages:
+                            st.caption(f"Table OCR scanned page(s): {', '.join(map(str, ocr_pages))}")
+                        if not table_diagnostics.get("ocr_available", True):
+                            st.warning("Local OCR engine is unavailable; only PDF text tables were examined.")
                     except Exception as exc:
                         table_rows = []
                         st.warning(f"Cannot extract the R-group table from the PDF text layer: {exc}")
