@@ -2,6 +2,7 @@
 from rdkit import Chem
 from markush_pipeline import (
     normalize_scaffold, resolve_group, complete, extract_tables, build_from_table,
+    export_constructed_smi, export_constructed_sdf,
 )
 
 source = "C1=CC=C(C=C1)N2CCC3=C(C=C(C=C3)[R1])CC2=O"
@@ -24,6 +25,12 @@ for row in results:
     assert mol and not any(a.GetAtomicNum()==0 for a in mol.GetAtoms())
 assert "Cl" in results[0]["SMILES"]
 assert "Cl" not in results[1]["SMILES"]
+assert export_constructed_smi(results).count(b"\n") == 2
+sdf = export_constructed_sdf(results).decode("utf-8")
+supplier = Chem.SDMolSupplier()
+supplier.SetData(sdf, removeHs=True)
+assert len([m for m in supplier if m is not None]) == 2
+assert "CONSTRUCTED_CANDIDATE_NOT_SOURCE_VERIFIED" in sdf
 
 refused = build_from_table(scaffold, [
     {"Compound_ID":"X1","Page":4,"R_groups":{1:"unknown R group"}},
