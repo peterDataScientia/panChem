@@ -82,6 +82,10 @@ def preview(data, page):
     finally:
         doc.close()
 
+@st.cache_data(show_spinner=False, max_entries=6)
+def cached_sar_table_rows(pdf_bytes, focus_pages):
+    return extract_tables_from_pdf(pdf_bytes, focus_pages=focus_pages)
+
 token = github_token()
 if not token:
     st.error("Extraction is temporarily unavailable. Contact the app administrator.")
@@ -400,10 +404,10 @@ if artifact_id:
                         })
                 if original_pdf:
                     try:
-                        table_rows, table_diagnostics = extract_tables_from_pdf(
+                        table_rows, table_diagnostics = cached_sar_table_rows(
                             original_pdf,
-                            focus_pages=[int(x.get("page")) for x in reviewed
-                                         if str(x.get("page", "")).isdigit()],
+                            tuple(sorted(set(int(x.get("page")) for x in reviewed
+                                             if str(x.get("page", "")).isdigit()))),
                         )
                         ocr_pages = table_diagnostics.get("ocr_pages", [])
                         if ocr_pages:
@@ -432,7 +436,7 @@ if artifact_id:
                 else:
                     assembled = []
                     if not table_rows and original_pdf:
-                        st.info("No complete R-group table was found in the readable PDF text layer. Image-only tables need a different extraction method or review.")
+                        st.info("No usable R-group table was identified by text extraction or OCR. Check whether the table is embedded in images, spans multiple pages, or uses graphical R-group cells.")
                     if not original_pdf:
                         st.info("The source PDF is not retained in this session. Open a new extraction from the original PDF to link table rows.")
                 if assembled:
