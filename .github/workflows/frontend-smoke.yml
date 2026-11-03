@@ -5,6 +5,8 @@ on:
     paths:
       - 'app.py'
       - 'scaffold_builder.py'
+      - 'auto_compounds.py'
+      - 'tests/smoke_auto_compounds.py'
       - 'pages/1_Scaffold_R_Group_Builder.py'
       - 'tests/smoke_scaffold_builder.py'
       - 'ketcher_review.py'
@@ -43,7 +45,9 @@ jobs:
       - name: Install frontend dependencies
         run: python -m pip install -r requirements.txt
       - name: Check Python syntax
-        run: python -m compileall -q scaffold_builder.py pages/1_Scaffold_R_Group_Builder.py tests/smoke_scaffold_builder.py ketcher_review.py app.py time_utils.py chemqa.py pdf_viewer.py progress_events.py tests/smoke_2d.py tests/smoke_pdf_viewer.py tests/smoke_realtime.py tests/smoke_time_eat.py performance_diagnostics.py worker.py tests/smoke_performance.py
+        run: python -m compileall -q auto_compounds.py tests/smoke_auto_compounds.py scaffold_builder.py pages/1_Scaffold_R_Group_Builder.py tests/smoke_scaffold_builder.py ketcher_review.py app.py time_utils.py chemqa.py pdf_viewer.py progress_events.py tests/smoke_2d.py tests/smoke_pdf_viewer.py tests/smoke_realtime.py tests/smoke_time_eat.py performance_diagnostics.py worker.py tests/smoke_performance.py
+      - name: Verify automatic DECIMER compound extraction
+        run: PYTHONPATH=. python tests/smoke_auto_compounds.py
       - name: Verify scaffold assembly, error handling and exports
         run: PYTHONPATH=. python tests/smoke_scaffold_builder.py
       - name: Verify native and fallback molecular 2D drawing
