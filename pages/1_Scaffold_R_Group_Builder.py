@@ -33,11 +33,12 @@ if extracted:
 if "pc_auto_results" in st.session_state:
     auto_rows = st.session_state.pc_auto_results
     valid_auto = [r for r in auto_rows if r["Status"] == "VALID_SYNTAX"]
+    verified_auto = [r for r in valid_auto if r.get("Image_verified") == "YES"]
     unresolved = [r for r in auto_rows if r["Status"] != "VALID_SYNTAX"]
     aa, bb, cc = st.columns(3)
     aa.metric("Detected", len(auto_rows))
-    bb.metric("Valid candidates", len(valid_auto))
-    cc.metric("Need review", len(unresolved))
+    bb.metric("Syntax-valid", len(valid_auto))
+    cc.metric("Verified against PDF", len(verified_auto))
     st.dataframe(pd.DataFrame(auto_rows), hide_index=True, width="stretch")
     scaffold_groups = {}
     for rec in valid_auto:
@@ -46,12 +47,12 @@ if "pc_auto_results" in st.session_state:
         for scaffold, members in sorted(scaffold_groups.items(), key=lambda item: -len(item[1])):
             st.code(scaffold, language=None)
             st.caption(f"{len(members)} compound(s): {', '.join(members[:20])}")
-    st.warning("Murcko scaffold grouping does not reconstruct compounds from Markush R-group tables. Unresolved entries are excluded from SMI export; check extracted structures against the PDF.")
+    st.warning("Murcko grouping does not reconstruct Markush R-group tables. Valid SMILES are candidates only; final SMI export includes only structures confirmed against the original PDF image on the DECIMER page.")
     c1, c2 = st.columns(2)
     c1.download_button("Download candidate CSV", export_candidates_csv(auto_rows), "panChem_auto_compounds.csv",
                        "text/csv", use_container_width=True)
     c2.download_button("Download valid SMI", export_candidates_smi(auto_rows), "panChem_auto_compounds.smi",
-                       "text/plain", use_container_width=True, disabled=not valid_auto)
+                       "text/plain", use_container_width=True, disabled=not verified_auto)
 st.divider()
 st.subheader("Manual completion — only when needed")
 with st.expander("2. Original source PDF", expanded=False):
