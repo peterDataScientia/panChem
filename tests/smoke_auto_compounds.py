@@ -18,7 +18,10 @@ assert [row["Status"] for row in rows] == [
 assert rows[0]["Scaffold_SMILES"] == "c1ccccc1"
 assert rows[0]["Page"] == "4"
 assert len([r for r in rows if r["Scaffold_SMILES"] == "c1ccccc1"]) == 2
-assert export_candidates_smi(rows).count(b"\n") == 2
+assert export_candidates_smi(rows) == b"", "Unverified structures cannot enter final SMI export"
+verified = candidate_rows([{"page": "4", "structure": "1", "smiles": "c1ccccc1O", "verified_against_pdf": True}])
+assert export_candidates_smi(verified).count(b"\n") == 1
+assert verified[0]["Image_verified"] == "YES"
 assert b"MARKUSH_REVIEW" in export_candidates_csv(rows)
 
 stream = io.StringIO()
@@ -45,4 +48,5 @@ problematic = candidate_rows([
 ])
 assert all(row["Status"] != "VALID_SYNTAX" for row in problematic)
 assert export_candidates_smi(problematic) == b""
+assert all(row["Image_verified"] == "NO" for row in problematic)
 print("DECIMER CSV/ZIP, scaffold grouping, ambiguous entry exclusion, export: PASS")
