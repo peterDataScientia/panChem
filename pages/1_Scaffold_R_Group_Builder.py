@@ -1,151 +1,221 @@
-"""panChem literature compound-series builder; complements DECIMER extraction."""
+"""panChem connected Markush reconstruction.
+
+Uses DECIMER session results and the original uploaded PDF. Markush molecular
+assembly is based on table rows, not Bemis-Murcko scaffolds.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
 
 import pandas as pd
-import pypdfium2 as pdfium
 import streamlit as st
+from rdkit import Chem
 
-from chemqa import molecule_svg
-from pdf_viewer import full_page_viewer
-from scaffold_builder import build_records, export_csv, export_sdf, export_smi
 from auto_compounds import candidate_rows, export_candidates_csv, export_candidates_smi
+from chemqa import molecule_svg
+from markush_pipeline import (
+    normalize_scaffold, extract_tables_from_pdf, build_from_table,
+    export_constructed_smi, export_constructed_sdf,
+)
+from pdf_viewer import full_page_viewer
 
-st.set_page_config(page_title="panChem | Scaffold builder", page_icon="🧪", layout="wide")
+st.set_page_config(page_title="panChem | Markush reconstruction", page_icon="🧪", layout="wide")
 st.title("🧪 panChem")
-st.caption("Extract and curate chemical structures from research PDFs.")
-st.subheader("Scaffold + R-group builder")
-st.caption("Connected to panChem DECIMER results in this session. No separate results upload required.")
+st.caption("DECIMER → Markush scaffold → R-group table → complete molecular structures")
+st.subheader("Markush and R-group reconstruction")
 
-st.subheader("1. Auto-extract compounds from DECIMER")
-st.caption("DECIMER results are shared directly from the main panChem page. Completed structures are grouped by scaffold; ambiguous drawings remain for review.")
-extracted = st.session_state.get("panchem_builder_source_rows", [])
-if not extracted:
-    st.info("Run DECIMER from the main panChem page. When the extraction finishes, compound analysis appears automatically there and here, with no second upload.")
-if extracted:
-    st.caption(f"{len(extracted)} source records available.")
-    import hashlib
-    import json
-    digest = hashlib.sha256(json.dumps(extracted, sort_keys=True, default=str).encode()).hexdigest()
-    if st.session_state.get("pc_auto_source_digest") != digest:
-        st.session_state.pc_auto_results = candidate_rows(extracted)
-        st.session_state.pc_auto_source_digest = digest
-    if st.button("Refresh automatic compound analysis", key="pc_auto_run"):
-        st.session_state.pc_auto_results = candidate_rows(extracted)
-if "pc_auto_results" in st.session_state:
-    auto_rows = st.session_state.pc_auto_results
-    valid_auto = [r for r in auto_rows if r["Status"] == "VALID_SYNTAX"]
-    verified_auto = [r for r in valid_auto if r.get("Image_verified") == "YES"]
-    unresolved = [r for r in auto_rows if r["Status"] != "VALID_SYNTAX"]
-    aa, bb, cc = st.columns(3)
-    aa.metric("Detected", len(auto_rows))
-    bb.metric("Syntax-valid", len(valid_auto))
-    cc.metric("Verified against PDF", len(verified_auto))
-    st.dataframe(pd.DataFrame(auto_rows), hide_index=True, width="stretch")
-    scaffold_groups = {}
-    for rec in valid_auto:
-        scaffold_groups.setdefault(rec["Scaffold_SMILES"] or "(no ring scaffold)", []).append(rec["Compound_ID"])
-    with st.expander("Detected scaffold families", expanded=True):
-        for scaffold, members in sorted(scaffold_groups.items(), key=lambda item: -len(item[1])):
-            st.code(scaffold, language=None)
-            st.caption(f"{len(members)} compound(s): {', '.join(members[:20])}")
-    st.info("This section groups complete DECIMER structures by their Murcko scaffolds. For automatic Markush R-group table reading and full-molecule construction, use \"Markush → completed structures\" on the main panChem results page. This section exports only PDF-verified DECIMER structures; the Markush section offers separate, clearly labelled candidate CSV/SMI/SDF exports.")
-    c1, c2 = st.columns(2)
-    c1.download_button("Download candidate CSV", export_candidates_csv(auto_rows), "panChem_auto_compounds.csv",
-                       "text/csv", use_container_width=True)
-    c2.download_button("Download valid SMI", export_candidates_smi(auto_rows), "panChem_auto_compounds.smi",
-                       "text/plain", use_container_width=True, disabled=not verified_auto)
-st.divider()
-st.subheader("Manual completion — only when needed")
-with st.expander("2. Original source PDF", expanded=False):
-    data = st.session_state.get("panchem_source_pdf")
-    if data:
-        try:
-            doc = pdfium.PdfDocument(data)
-            try:
-                st.caption(f"{len(doc)} page(s). PDF is reused from the main panChem upload.")
-                st.components.v1.html(full_page_viewer(data), height=760, scrolling=False)
-            finally:
-                doc.close()
-        except Exception as exc:
-            st.error(f"Could not preview PDF: {exc}")
-    else:
-        st.info("The PDF is available here when the original extraction was started in the current session.")
+source = st.session_state.get("panchem_builder_source_rows") or []
+pdf_bytes = st.session_state.get("panchem_source_pdf")
+if not source:
+    st.info("Extract a PDF on the main panChem page first. DECIMER results will appear here automatically; no results upload is needed.")
+    if st.button("Open PDF extraction", type="primary"):
+        st.switch_page("app.py")
+    st.stop()
 
-st.subheader("3. Scaffolds")
-st.caption("Place numbered attachment atoms at substitution sites, e.g. [*:1], [*:2], [*:3].")
-if "pc_scaffold_templates" not in st.session_state:
-    st.session_state.pc_scaffold_templates = pd.DataFrame([
-        {"Template": "example", "Scaffold_SMILES": "Cc1nc([*:1])[nH]c1[*:2]"}])
-if "pc_scaffold_fragments" not in st.session_state:
-    st.session_state.pc_scaffold_fragments = pd.DataFrame([
-        {"Name": "phenyl", "SMILES": "c1ccccc1"},
-        {"Name": "4-hydroxyphenyl", "SMILES": "c1ccc(O)cc1"}])
-if "pc_scaffold_compounds" not in st.session_state:
-    st.session_state.pc_scaffold_compounds = pd.DataFrame([
-        {"Compound_ID": "Example-1", "Template": "example",
-         "R1": "phenyl", "R2": "4-hydroxyphenyl", "R3": "",
-         "Source": "", "Page": ""}])
-templates = st.data_editor(st.session_state.pc_scaffold_templates, num_rows="dynamic",
-                           width="stretch", key="pc_templates_editor")
-st.subheader("4. Fragment library")
-st.caption("Each fragment SMILES starts at its attachment atom. Example: para-hydroxyphenyl is c1ccc(O)cc1.")
-fragments = st.data_editor(st.session_state.pc_scaffold_fragments, num_rows="dynamic",
-                           width="stretch", key="pc_fragments_editor")
-st.subheader("5. Compound assignments")
-st.caption("Fill R1–R3 by fragment name or SMILES. Add source and page for traceability.")
-compounds = st.data_editor(st.session_state.pc_scaffold_compounds, num_rows="dynamic",
-                           width="stretch", key="pc_compounds_editor")
-run, reset = st.columns([2, 1])
-clicked = run.button("Build and validate structures", type="primary", use_container_width=True)
-if reset.button("Clear results", use_container_width=True):
-    st.session_state.pop("pc_scaffold_results", None)
-    st.session_state.pop("pc_scaffold_molecules", None)
-    st.rerun()
-if clicked:
-    names = [str(r.get("Template") or "").strip() for r in templates.fillna("").to_dict("records") if str(r.get("Template") or "").strip()]
-    fragment_names = [str(r.get("Name") or "").strip() for r in fragments.fillna("").to_dict("records") if str(r.get("Name") or "").strip()]
-    if len(names) != len(set(names)) or len(fragment_names) != len(set(fragment_names)):
-        st.error("Scaffold and fragment names must be unique.")
-    else:
-        templates_map = {str(r["Template"]).strip(): str(r["Scaffold_SMILES"]).strip()
-                         for r in templates.fillna("").to_dict("records") if str(r["Template"]).strip()}
-        library_map = {str(r["Name"]).strip(): str(r["SMILES"]).strip()
-                       for r in fragments.fillna("").to_dict("records") if str(r["Name"]).strip()}
-        rows, molecules = build_records(compounds.fillna("").to_dict("records"), templates_map, library_map)
-        st.session_state.pc_scaffold_results = rows
-        st.session_state.pc_scaffold_molecules = molecules
+st.caption(f"{len(source)} DECIMER structures received directly from panChem.")
 
-if "pc_scaffold_results" in st.session_state:
-    st.divider()
-    st.subheader("6. Review and export")
-    rows = st.session_state.pc_scaffold_results
-    molecules = st.session_state.pc_scaffold_molecules
-    if not rows:
-        st.warning("No compound identifiers supplied.")
+@st.cache_data(show_spinner=False, max_entries=6)
+def read_tables(data, focus):
+    return extract_tables_from_pdf(data, focus_pages=focus)
+
+def _source_smiles(row):
+    return str(row.get("reviewed_smiles") if "reviewed_smiles" in row else row.get("smiles") or "").strip()
+
+candidates = candidate_rows(source)
+raw_scaffolds = []
+for row in source:
+    raw = _source_smiles(row)
+    normalized = normalize_scaffold(raw)
+    if normalized or "[R" in raw or "[*:" in raw:
+        raw_scaffolds.append({
+            "Label": f"Page {row.get('page', '?')} · structure {row.get('structure', '?')}",
+            "Detected_SMILES": raw,
+            "Normalized_SMILES": normalized or "",
+        })
+
+pages = tuple(sorted({int(row["page"]) for row in source if str(row.get("page", "")).isdigit()}))
+table_rows = []
+diagnostics = {}
+if pdf_bytes:
+    try:
+        table_rows, diagnostics = read_tables(pdf_bytes, pages)
+    except Exception as exc:
+        st.warning(f"Could not read the source PDF table: {exc}")
+
+col1, col2, col3 = st.columns(3)
+col1.metric("DECIMER structures", len(source))
+col2.metric("Markush candidates", len(raw_scaffolds))
+col3.metric("Detected R-group rows", len(table_rows))
+
+tab_complete, tab_markush, tab_other = st.tabs([
+    "Constructed molecules", "Markush & R-group review", "Other extracted structures"
+])
+
+with tab_markush:
+    st.markdown("**Markush scaffolds detected from DECIMER**")
+    if raw_scaffolds:
+        st.dataframe(pd.DataFrame(raw_scaffolds), hide_index=True, width="stretch")
     else:
-        valid = sum(r["Status"] == "VALID_SYNTAX" for r in rows)
-        a, b, c = st.columns(3)
-        a.metric("Compounds", len(rows))
-        b.metric("SMILES valid", valid)
-        c.metric("Failed", len(rows) - valid)
-        st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
-        if molecules:
-            st.markdown("**Molecular structure review**")
-            for start in range(0, len(molecules), 3):
-                columns = st.columns(3)
-                for col, (cid, mol) in zip(columns, molecules[start:start+3]):
+        st.warning("No usable numbered Markush labels were recognized automatically. Check the original drawing, then enter its scaffold with [*:1], [*:2], etc. in the correction field below.")
+
+    default_index = 0
+    selected = st.selectbox(
+        "Scaffold associated with the table",
+        options=list(range(len(raw_scaffolds))) if raw_scaffolds else [-1],
+        format_func=lambda i: raw_scaffolds[i]["Label"] if i >= 0 else "Enter scaffold SMILES",
+        key="pc_markush_selected",
+    )
+    default_scaffold = raw_scaffolds[selected]["Normalized_SMILES"] if selected >= 0 else ""
+    if selected >= 0 and not default_scaffold:
+        default_scaffold = raw_scaffolds[selected]["Detected_SMILES"]
+
+    st.caption("Attachment sites must be [*:1], [*:2] or [*:3]. Edit only if the DECIMER scaffold contains a recognition error.")
+    scaffold_text = st.text_area(
+        "Scaffold SMILES",
+        value=default_scaffold,
+        key=f"pc_markush_scaffold_{selected}",
+        height=85,
+    )
+    normalized = normalize_scaffold(scaffold_text)
+    if not normalized and "[*:" in scaffold_text:
+        mol = Chem.MolFromSmiles(scaffold_text)
+        if mol and any(a.GetAtomicNum() == 0 and a.GetAtomMapNum() > 0 for a in mol.GetAtoms()):
+            normalized = Chem.MolToSmiles(mol, isomericSmiles=True)
+    if normalized:
+        mol = Chem.MolFromSmiles(normalized)
+        if mol:
+            img = molecule_svg(mol)
+            if img:
+                st.image(img, width=360)
+    elif scaffold_text:
+        st.error("A usable scaffold was not resolved. Check R labels and attachment atoms before assembly.")
+
+    st.markdown("**R-group table associated with the original PDF**")
+    if diagnostics.get("ocr_pages"):
+        st.caption("OCR checked pages: " + ", ".join(map(str, diagnostics["ocr_pages"])))
+    if pdf_bytes and not table_rows:
+        st.info("No machine-readable R-group table was identified. The original PDF is available below; edit only the missing table cells.")
+    if not pdf_bytes:
+        st.warning("The matching PDF is unavailable in this session. Only the DECIMER structures can be shown; no table assignments will be guessed.")
+
+    source_id = hashlib.sha256(
+        (str(st.session_state.get("panchem_source_job_id", "")) + str(len(source))
+         + str(table_rows)).encode("utf-8")
+    ).hexdigest()[:12]
+    editable_rows = [
+        {"Compound_ID": row["Compound_ID"], "Page": row.get("Page", ""),
+         "R1": row.get("R_groups", {}).get(1, ""),
+         "R2": row.get("R_groups", {}).get(2, ""),
+         "R3": row.get("R_groups", {}).get(3, "")}
+        for row in table_rows
+    ]
+    edited = st.data_editor(
+        pd.DataFrame(editable_rows, columns=["Compound_ID", "Page", "R1", "R2", "R3"]),
+        num_rows="dynamic", hide_index=True, width="stretch",
+        key=f"pc_markush_table_{source_id}"
+    )
+    confirmed_rows = []
+    for row in edited.fillna("").to_dict("records"):
+        cid = str(row.get("Compound_ID", "")).strip()
+        if cid:
+            confirmed_rows.append({
+                "Compound_ID": cid, "Page": row.get("Page", ""),
+                "R_groups": {index: str(row.get(f"R{index}", "")).strip()
+                             for index in (1, 2, 3) if str(row.get(f"R{index}", "")).strip()}
+            })
+    st.session_state["pc_markush_active_rows"] = confirmed_rows
+    st.session_state["pc_markush_active_scaffold"] = normalized or ""
+    st.session_state["pc_markush_active_label"] = (
+        raw_scaffolds[selected]["Label"] if selected >= 0 else "Corrected scaffold"
+    )
+
+    with st.expander("View original PDF", expanded=False):
+        if pdf_bytes:
+            st.components.v1.html(full_page_viewer(pdf_bytes), height=700, scrolling=False)
+        else:
+            st.caption("Original PDF not available in the current session.")
+
+with tab_complete:
+    scaffold = st.session_state.get("pc_markush_active_scaffold", "")
+    assignment_rows = st.session_state.get("pc_markush_active_rows", [])
+    # The Markush tab above executes before this block in Streamlit's script order,
+    # including on editor reruns, so the latest edits are reflected immediately.
+    if scaffold and assignment_rows:
+        results = build_from_table(
+            scaffold, assignment_rows,
+            st.session_state.get("pc_markush_active_label", "Markush scaffold")
+        )
+        st.session_state["panchem_constructed_rows"] = results
+        completed = [r for r in results if r["Status"] == "CONSTRUCTED_CANDIDATE"]
+        metrics = st.columns(3)
+        metrics[0].metric("Table compounds", len(results))
+        metrics[1].metric("Full structures generated", len(completed))
+        metrics[2].metric("Need review", len(results) - len(completed))
+        st.dataframe(pd.DataFrame(results), hide_index=True, width="stretch")
+        if completed:
+            st.markdown("**Completed 2D molecular structures**")
+            shown_page = st.number_input(
+                "Page of constructed structures", min_value=1,
+                max_value=(len(completed)-1)//18+1, value=1, step=1,
+                key="pc_constructed_page"
+            )
+            display = completed[(shown_page-1)*18:shown_page*18]
+            for start in range(0, len(display), 3):
+                cols = st.columns(3)
+                for col, rec in zip(cols, display[start:start+3]):
                     with col:
-                        st.caption(cid)
-                        svg = molecule_svg(mol)
+                        st.caption(f"{rec['Compound_ID']} · {rec['Formula']}")
+                        mol = Chem.MolFromSmiles(rec["SMILES"])
+                        svg = molecule_svg(mol) if mol else None
                         if svg:
                             st.image(svg, use_container_width=True)
-                        else:
-                            st.warning("2D preview unavailable.")
-        st.warning("RDKit validates structure syntax and valence, not correspondence with the published drawing, attachment positions or stereochemistry. Verify against the PDF.")
-        left, mid, right = st.columns(3)
-        left.download_button("Download CSV", export_csv(rows), "panChem_scaffold_compounds.csv",
-                             "text/csv", use_container_width=True)
-        mid.download_button("Download SMI", export_smi(rows), "panChem_scaffold_compounds.smi",
-                            "text/plain", use_container_width=True, disabled=not valid)
-        right.download_button("Download SDF", export_sdf(molecules) if molecules else b"",
-                              "panChem_scaffold_compounds.sdf", "chemical/x-mdl-sdfile",
-                              use_container_width=True, disabled=not valid)
+                        st.code(rec["SMILES"], language=None)
+        st.caption("These are reconstructed candidate molecules; confirm the scaffold position, substituent assignment and stereochemistry against the PDF.")
+        a,b,c = st.columns(3)
+        a.download_button("Candidate CSV", pd.DataFrame(results).to_csv(index=False).encode(),
+                          "panChem_markush_compounds.csv", "text/csv", use_container_width=True)
+        b.download_button("Candidate SMI", export_constructed_smi(results),
+                          "panChem_markush_compounds.smi", "text/plain",
+                          disabled=not completed, use_container_width=True)
+        c.download_button("Candidate SDF", export_constructed_sdf(results),
+                          "panChem_markush_compounds.sdf", "chemical/x-mdl-sdfile",
+                          disabled=not completed, use_container_width=True)
+    else:
+        st.info("To construct full molecules, use the Markush & R-group review tab to select or correct a scaffold and its table rows. No chemical structures are fabricated when the original PDF lacks sufficient information.")
+
+with tab_other:
+    st.caption("Complete DECIMER predictions are shown separately from reconstructed Markush compounds.")
+    valid = [r for r in candidates if r["Status"] == "VALID_SYNTAX"]
+    verified = [r for r in valid if r.get("Image_verified") == "YES"]
+    a,b,c = st.columns(3)
+    a.metric("Predictions", len(candidates))
+    b.metric("Syntax valid", len(valid))
+    c.metric("Source verified", len(verified))
+    st.dataframe(pd.DataFrame(candidates), hide_index=True, width="stretch")
+    d1,d2 = st.columns(2)
+    d1.download_button("Candidate CSV", export_candidates_csv(candidates),
+                       "panChem_decimer_candidates.csv", "text/csv", use_container_width=True)
+    d2.download_button("Verified SMI", export_candidates_smi(candidates),
+                       "panChem_verified_direct.smi", "text/plain",
+                       disabled=not verified, use_container_width=True)
