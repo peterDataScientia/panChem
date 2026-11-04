@@ -11,6 +11,12 @@ scaffold = normalize_scaffold(source)
 assert scaffold and "[*:1]" in scaffold
 assert normalize_scaffold("Cc1ccccc1") is None
 assert normalize_scaffold("c1ccc([R1])cc1[R1]") is None
+# Exact Markush SMILES observed in panChem extraction-41617212061.
+markush1 = "C1=CC=C(C=C1)N2CCC3=C(C=C(C=C3)[R1])CC2=O"
+markush2 = "C1=CC=C(C=C1)N2CC3=C(C=CC(=C3)[R1])CCC2=O"
+assert normalize_scaffold(markush1) and normalize_scaffold(markush2)
+assert normalize_scaffold(markush1) != normalize_scaffold(markush2)
+assert "[*:1]" in normalize_scaffold(markush1)
 
 table = extract_tables({4: "Table 1\nCompound  R1  R2  IC50\n8a  Cl  OMe  0.8\n8b  F  H  1.1\n"})
 assert len(table) == 2
