@@ -19,6 +19,7 @@ from markush_pipeline import (
     export_constructed_smi, export_constructed_sdf,
 )
 from pdf_viewer import full_page_viewer
+from source_pdf import resolve_pdf_for_run
 
 st.set_page_config(page_title="panChem | Markush reconstruction", page_icon="🧪", layout="wide")
 st.title("🧪 panChem")
@@ -27,6 +28,47 @@ st.subheader("Markush and R-group reconstruction")
 
 source = st.session_state.get("panchem_builder_source_rows") or []
 pdf_bytes = st.session_state.get("panchem_source_pdf")
+active_run = st.session_state.get("active_run_id")
+active_artifact = st.session_state.get("active_artifact_id")
+zip_blob = st.session_state.get(f"artifact-{active_artifact}") if active_artifact else None
+source_run = st.session_state.get("panchem_source_pdf_run_id")
+if pdf_bytes and active_run and source_run and str(source_run) != str(active_run):
+    pdf_bytes = None
+if not pdf_bytes:
+    try:
+        import requests
+        def _request(method, url, token):
+            response = requests.request(
+                method, url,
+                headers={"Authorization": f"Bearer {token}",
+                         "Accept": "application/vnd.github+json",
+                         "X-GitHub-Api-Version": "2022-11-28"},
+                timeout=60)
+            response.raise_for_status()
+            return response
+        def _token():
+            try:
+                return st.secrets.get("GITHUB_TOKEN", "")
+            except Exception:
+                return ""
+        @st.cache_data(show_spinner=False, max_entries=12)
+        def _restore_pdf(run_id, artifact, token):
+            return resolve_pdf_for_run(
+                run_id, token, _request,
+                "https://api.github.com/repos/peterDataScientia/panChem",
+                artifact=artifact)
+        pdf_bytes, recovered_job, source_location = _restore_pdf(
+            active_run, zip_blob, _token())
+        if pdf_bytes:
+            st.session_state["panchem_source_pdf"] = pdf_bytes
+            st.session_state["panchem_source_pdf_run_id"] = active_run
+            if recovered_job:
+                st.session_state["panchem_source_job_id"] = recovered_job
+        else:
+            st.caption(f"Source PDF lookup: {source_location}")
+    except Exception:
+        st.warning("Could not retrieve the source PDF for this run. Check the matching GitHub job or artifact.")
+
 if not source:
     st.info("Extract a PDF on the main panChem page first. DECIMER results will appear here automatically; no results upload is needed.")
     if st.button("Open PDF extraction", type="primary"):
