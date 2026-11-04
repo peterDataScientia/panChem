@@ -202,6 +202,8 @@ def live_progress():
                             st.session_state["active_artifact_id"] = aid
                             st.session_state["active_artifact_name"] = art["name"]
                             st.session_state["active_run_id"] = run_id
+                            if st.session_state.get("panchem_source_pdf"):
+                                st.session_state["panchem_source_pdf_run_id"] = run_id
                         st.session_state.pop("panchem_live_error", None)
                         st.rerun(scope="app")
                     except Exception as exc:
