@@ -19,6 +19,7 @@ from chemqa import assess, molecule_svg, rows_from_artifact, make_review_zip
 from auto_compounds import candidate_rows, export_candidates_csv, export_candidates_smi
 from markush_pipeline import normalize_scaffold, extract_tables_from_pdf, build_from_table, export_constructed_sdf, export_constructed_smi
 from pdf_viewer import full_page_viewer
+from source_pdf import resolve_pdf_for_run
 from time_utils import format_eat
 from performance_diagnostics import performance_from_artifact, github_timing_report
 from ketcher_review import validated_ketcher_result, initial_molfile, result_molfile
@@ -590,31 +591,27 @@ def recent_jobs():
                             st.session_state[f"artifact-{aid}"] = api_request(
                                 "GET", f"{API}/actions/artifacts/{aid}/zip", token,
                             ).content
-                        # Recover the matching original PDF for historical
-                        # extraction runs, rather than mixing results with a
-                        # PDF from another job in the current browser session.
+                        # Resolve the PDF for this exact historical run. Git Blob
+                        # fallback supports PDFs >1 MB (GitHub Contents API limit).
                         st.session_state.pop("panchem_source_pdf", None)
                         st.session_state.pop("panchem_source_job_id", None)
+                        st.session_state.pop("panchem_source_pdf_run_id", None)
                         try:
-                            selected_run = api_request(
-                                "GET", f"{API}/actions/runs/{selected}", token,
-                            ).json()
-                            commit_message = (selected_run.get("head_commit") or {}).get("message", "")
-                            matched = re.search(r"panChem PDF job ([a-f0-9]{12})\b", commit_message)
-                            if matched:
-                                job_id = matched.group(1)
-                                source_json = api_request(
-                                    "GET", f"{API}/contents/jobs/{job_id}/paper.pdf", token
-                                ).json()
-                                import base64 as _base64
-                                pdf_blob = _base64.b64decode(source_json.get("content", ""))
-                                if pdf_blob.startswith(b"%PDF") and len(pdf_blob) <= 25 * 1024 * 1024:
-                                    st.session_state["panchem_source_pdf"] = pdf_blob
+                            pdf_blob, job_id, origin = resolve_pdf_for_run(
+                                selected, token, api_request, API,
+                                artifact=st.session_state[f"artifact-{aid}"],
+                            )
+                            if pdf_blob:
+                                st.session_state["panchem_source_pdf"] = pdf_blob
+                                st.session_state["panchem_source_pdf_run_id"] = selected
+                                if job_id:
                                     st.session_state["panchem_source_job_id"] = job_id
-                        except Exception:
-                            # Historical results remain reviewable even if the
-                            # source PDF is unavailable; never reuse a wrong PDF.
-                            pass
+                            else:
+                                st.warning(f"Original PDF unavailable for this run: {origin}")
+                        except Exception as exc:
+                            import logging
+                            logging.exception("Historical source PDF recovery failed")
+                            st.warning("Could not recover the original PDF for this run.")
                         st.session_state["manual_view_run_id"] = selected
                         st.session_state["active_artifact_id"] = aid
                         st.session_state["active_artifact_name"] = art["name"]
