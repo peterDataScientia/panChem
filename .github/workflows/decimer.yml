@@ -131,6 +131,30 @@ jobs:
         with:
           path: ~/.data
           key: panchem-decimer-models-v2-tf215-decimer281
+      - name: Attach matching source PDF to extraction artifact
+        if: success()
+        env:
+          MANUAL_PDF_PATH: ${{ inputs.pdf_path }}
+        run: |
+          python - <<'PY'
+          import json, os, re, shutil
+          from pathlib import Path
+          src = None
+          if os.environ.get("GITHUB_EVENT_NAME") == "push":
+              event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+              message = (event.get("head_commit") or {}).get("message", "").strip()
+              found = re.fullmatch(r"panChem PDF job ([0-9a-f]{12}) pages=[0-9,-]+", message)
+              if found:
+                  src = Path("jobs") / found.group(1) / "paper.pdf"
+          elif os.environ.get("MANUAL_PDF_PATH"):
+              src = Path(os.environ["MANUAL_PDF_PATH"])
+          if src and src.is_file() and src.stat().st_size <= 25 * 1024 * 1024:
+              Path("results").mkdir(exist_ok=True)
+              shutil.copyfile(src, "results/source.pdf")
+              print("Matched PDF attached to results artifact", flush=True)
+          else:
+              print("No local source PDF available for artifact; GitHub run fallback applies", flush=True)
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -139,6 +163,7 @@ jobs:
             results/results.csv
             results/results.smi
             results/performance.json
+            results/source.pdf
             results/page_*_structure_*.png
           retention-days: 7
           if-no-files-found: warn
