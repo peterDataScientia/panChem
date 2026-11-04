@@ -31,6 +31,20 @@ pdf,job,origin=resolve_pdf_for_run(456,"token",request,"https://api.github.com/r
 assert pdf==original and job=="abc123def456" and origin=="github"
 assert len(seen)==2
 
+# GitHub Contents API returns empty content for files > 1 MB.
+def big_pdf_request(method,url,token):
+    if "/actions/runs/" in url:
+        return Reply({"head_commit":{"message":"panChem PDF job abc123def456 pages=4"}})
+    if url.endswith("/contents/jobs/abc123def456/paper.pdf"):
+        return Reply({"encoding":"none","size":1647440,"sha":"a"*40,"content":""})
+    if url.endswith("/git/blobs/"+"a"*40):
+        return Reply({"encoding":"base64","content":base64.b64encode(original).decode()})
+    raise AssertionError("Unexpected URL " + url)
+large, job, origin = resolve_pdf_for_run(
+    41628860887, "token", big_pdf_request, "https://api.github.com/repos/example/repo"
+)
+assert large == original and origin == "github-blob" and job == "abc123def456"
+
 def wrong_run(method,url,token):
     return Reply({"head_commit":{"message":"Some unrelated commit"}})
 pdf,job,info=resolve_pdf_for_run(345,"token",wrong_run,"https://api.github.com/repos/example/repo")
