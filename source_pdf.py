@@ -55,7 +55,16 @@ def resolve_pdf_for_run(run_id, token, api_request, repository_api, artifact=Non
     job_id = matched.group(1)
     record = api_request("GET", f"{repository_api}/contents/jobs/{job_id}/paper.pdf",
                          token).json()
-    if record.get("encoding") != "base64" or not record.get("content"):
-        return None, job_id, "Source PDF content is not available in GitHub"
-    pdf = base64.b64decode(record["content"])
-    return validated_pdf(pdf), job_id, "github"
+    if record.get("encoding") == "base64" and record.get("content"):
+        pdf = base64.b64decode(record["content"])
+        return validated_pdf(pdf), job_id, "github"
+    # GitHub Contents API omits base64 content for files larger than 1 MB.
+    # Git Blobs API supports files up to 100 MB and returns base64 data.
+    sha = record.get("sha")
+    if not sha or not re.fullmatch(r"[0-9a-f]{40}", str(sha)):
+        return None, job_id, "GitHub did not return file content or a valid blob SHA"
+    blob = api_request("GET", f"{repository_api}/git/blobs/{sha}", token).json()
+    if blob.get("encoding") != "base64" or not blob.get("content"):
+        return None, job_id, "GitHub blob did not contain recoverable source PDF"
+    pdf = base64.b64decode(blob["content"])
+    return validated_pdf(pdf), job_id, "github-blob"
