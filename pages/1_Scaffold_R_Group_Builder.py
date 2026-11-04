@@ -47,7 +47,7 @@ if "pc_auto_results" in st.session_state:
         for scaffold, members in sorted(scaffold_groups.items(), key=lambda item: -len(item[1])):
             st.code(scaffold, language=None)
             st.caption(f"{len(members)} compound(s): {', '.join(members[:20])}")
-    st.warning("Murcko grouping does not reconstruct Markush R-group tables. Valid SMILES are candidates only; final SMI export includes only structures confirmed against the original PDF image on the DECIMER page.")
+    st.info("This section groups complete DECIMER structures by their Murcko scaffolds. For automatic Markush R-group table reading and full-molecule construction, use \"Markush → completed structures\" on the main panChem results page. This section exports only PDF-verified DECIMER structures; the Markush section offers separate, clearly labelled candidate CSV/SMI/SDF exports.")
     c1, c2 = st.columns(2)
     c1.download_button("Download candidate CSV", export_candidates_csv(auto_rows), "panChem_auto_compounds.csv",
                        "text/csv", use_container_width=True)
