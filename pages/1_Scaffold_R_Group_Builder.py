@@ -28,7 +28,9 @@ st.subheader("Markush and R-group reconstruction")
 
 source = st.session_state.get("panchem_builder_source_rows") or []
 pdf_bytes = st.session_state.get("panchem_source_pdf")
-active_run = st.session_state.get("active_run_id")
+active_run = st.session_state.get("active_run_id") or next(
+    (row.get("source_run_id") for row in source if row.get("source_run_id")), None
+)
 active_artifact = st.session_state.get("active_artifact_id")
 zip_blob = st.session_state.get(f"artifact-{active_artifact}") if active_artifact else None
 source_run = st.session_state.get("panchem_source_pdf_run_id")
